@@ -39,6 +39,8 @@ class UpdateCheck:
     status: str
     message: str
     manifest: UpdateManifest | None = None
+    compare_result: int = 0
+    should_show_popup: bool = False
 
 
 class V2Updater:
@@ -52,7 +54,7 @@ class V2Updater:
         if not self.settings.enabled:
             self._log(
                 f"update disabled local_version_path={self.local_version_path} "
-                f"local_version={self.current_version} channel={self.settings.channel}"
+                f"local_version={self.current_version} channel={self.settings.channel} should_show_popup=False"
             )
             return UpdateCheck("disabled", "自動更新未啟用。")
 
@@ -70,13 +72,14 @@ class V2Updater:
         )
 
         compare = _compare_versions(self.current_version, manifest.version)
-        self._log(f"compare result={compare}")
+        should_show_popup = compare < 0
+        self._log(f"compare result={compare} should_show_popup={should_show_popup}")
         if compare >= 0:
-            self._log("update result=current")
-            return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest)
+            self._log("update result=current should_show_popup=False")
+            return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest, compare, False)
 
-        self._log("update result=available")
-        return UpdateCheck("available", f"發現新版 {manifest.version}。", manifest)
+        self._log("update result=available should_show_popup=True")
+        return UpdateCheck("available", f"發現新版 {manifest.version}。", manifest, compare, True)
 
     def apply(self, manifest: UpdateManifest) -> UpdateCheck:
         try:

@@ -403,7 +403,7 @@ class CustomsErpWindow(QMainWindow):
 
     def _check_updates_on_startup(self) -> None:
         result = self._check_updates(interactive=False)
-        if result and result.status == "available":
+        if result and result.should_show_popup:
             self._prompt_update(result)
 
     def _check_updates(self, interactive: bool) -> UpdateCheck | None:
@@ -411,7 +411,7 @@ class CustomsErpWindow(QMainWindow):
         result = updater.check()
         self.latest_update = result
         if interactive:
-            if result.status == "available":
+            if result.should_show_popup:
                 self._prompt_update(result)
             else:
                 QMessageBox.information(self, "更新", result.message)

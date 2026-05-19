@@ -53,18 +53,32 @@ def main() -> None:
         result = updater.check()
         if result.status != "current":
             raise RuntimeError(f"expected current, got {result.status}")
+        if result.should_show_popup:
+            raise RuntimeError("equal versions must not show update popup")
 
         log_text = (logs / "update-debug.log").read_text(encoding="utf-8")
         required = [
             f"local_version_path={local_manifest}",
             "local_version=1.0.2",
             "remote_version=1.0.2",
-            "compare result=0",
-            "update result=current",
+            "compare result=0 should_show_popup=False",
+            "update result=current should_show_popup=False",
         ]
         missing = [item for item in required if item not in log_text]
         if missing:
             raise RuntimeError(f"debug log missing: {missing}")
+
+        newer = updater_module.UpdateManifest("1.0.3", "local", "abc", "stable")
+        updater._load_manifest = lambda: newer  # type: ignore[method-assign]
+        newer_result = updater.check()
+        if not newer_result.should_show_popup:
+            raise RuntimeError("remote newer version should show update popup")
+
+        older = updater_module.UpdateManifest("1.0.1", "local", "abc", "stable")
+        updater._load_manifest = lambda: older  # type: ignore[method-assign]
+        older_result = updater.check()
+        if older_result.should_show_popup:
+            raise RuntimeError("remote older version must not show update popup")
     finally:
         settings_module.app_base_dir = original_app_base_dir  # type: ignore[assignment]
         updater_module.local_manifest_path = original_updater_local_manifest_path  # type: ignore[assignment]
@@ -75,4 +89,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
