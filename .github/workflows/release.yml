@@ -1,16 +1,23 @@
-name: Build and publish Windows EXE
+name: Build and publish AI Customs ERP V2
 
 on:
   push:
     branches:
       - main
-      - master
   workflow_dispatch:
     inputs:
       version:
         description: "Version number, for example 1.0.1"
-        required: true
+        required: false
         type: string
+      channel:
+        description: "Release channel"
+        required: true
+        default: "beta"
+        type: choice
+        options:
+          - beta
+          - stable
 
 permissions:
   contents: write
@@ -28,16 +35,34 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $version = "${{ inputs.version }}"
-            $tag = "v$version"
+            $inputVersion = "${{ inputs.version }}"
+            $channel = "${{ inputs.channel }}"
           } else {
-            $settings = Get-Content settings.json -Raw | ConvertFrom-Json
-            $baseVersion = $settings.version
-            $version = "$baseVersion.${{ github.run_number }}"
-            $tag = "v$version"
+            $inputVersion = ""
+            $channel = "stable"
           }
+
+          $settings = Get-Content settings.json -Raw | ConvertFrom-Json
+          $baseVersion = if ($inputVersion) { $inputVersion } else { $settings.version }
+
+          if ($channel -eq "beta") {
+            $version = "$baseVersion-beta.${{ github.run_number }}"
+            $tag = "v$version"
+            $prerelease = "true"
+            $makeLatest = "false"
+          } else {
+            $version = "$baseVersion.${{ github.run_number }}"
+            if ($inputVersion) { $version = $inputVersion }
+            $tag = "v$version"
+            $prerelease = "false"
+            $makeLatest = "true"
+          }
+
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
+          "channel=$channel" >> $env:GITHUB_OUTPUT
+          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
+          "make_latest=$makeLatest" >> $env:GITHUB_OUTPUT
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -69,8 +94,7 @@ jobs:
       - name: Build onefile EXE
         shell: pwsh
         run: |
-          .\build_exe.ps1
-          Copy-Item -Force "dist\通洋報關平台.exe" "dist\default.exe"
+          .\build_v2_exe.ps1
 
       - name: Generate version.json
         run: >
@@ -79,14 +103,24 @@ jobs:
           --tag "${{ steps.vars.outputs.tag }}"
           --version "${{ steps.vars.outputs.version }}"
           --exe "dist/default.exe"
+          --channel "${{ steps.vars.outputs.channel }}"
           --output "dist/version.json"
+
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 "dist\default.exe").Hash.ToLower()
+          Set-Content -Path "dist\SHA256.txt" -Value "$hash  default.exe" -Encoding UTF8
 
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
-          name: 通洋報關平台 ${{ steps.vars.outputs.version }}
-          make_latest: true
+          name: AI Customs ERP V2 ${{ steps.vars.outputs.version }}
+          prerelease: ${{ steps.vars.outputs.prerelease }}
+          make_latest: ${{ steps.vars.outputs.make_latest }}
           files: |
+            dist/通洋報關平台.exe
             dist/default.exe
             dist/version.json
+            dist/SHA256.txt
