@@ -120,7 +120,6 @@ jobs:
           prerelease: ${{ steps.vars.outputs.prerelease }}
           make_latest: ${{ steps.vars.outputs.make_latest }}
           files: |
-            dist/通洋報關平台.exe
             dist/default.exe
             dist/version.json
             dist/SHA256.txt
