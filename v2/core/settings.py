@@ -50,7 +50,7 @@ def logs_dir() -> Path:
 def load_settings() -> V2Settings:
     path = settings_path()
     if not path.exists():
-        settings = V2Settings()
+        settings = V2Settings(version=resolve_local_version())
         save_settings(settings)
         return settings
 
@@ -79,14 +79,14 @@ def save_settings(settings: V2Settings) -> None:
 
 
 def resolve_local_version(default: str = "1.0.0") -> str:
-    for path in (local_manifest_path(), app_base_dir() / "version.json"):
-        if not path.exists():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8-sig"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        version = str(data.get("version", "")).strip()
-        if version:
-            return version
+    path = local_manifest_path()
+    if not path.exists():
+        return default
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return default
+    version = str(data.get("version", "")).strip()
+    if version:
+        return version
     return default

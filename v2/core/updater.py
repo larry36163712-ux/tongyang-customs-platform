@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from v2.core.settings import UpdateSettings, app_base_dir, local_manifest_path, logs_dir, settings_path
+from v2.core.settings import UpdateSettings, local_manifest_path, logs_dir, resolve_local_version, settings_path
 
 
 @dataclass(frozen=True)
@@ -43,13 +43,17 @@ class UpdateCheck:
 
 class V2Updater:
     def __init__(self, current_version: str, settings: UpdateSettings) -> None:
-        self.current_version = current_version
         self.settings = settings
+        self.local_version_path = local_manifest_path()
+        self.current_version = resolve_local_version(current_version)
         self.log_path = logs_dir() / "update-debug.log"
 
     def check(self) -> UpdateCheck:
         if not self.settings.enabled:
-            self._log(f"update disabled local_version={self.current_version} channel={self.settings.channel}")
+            self._log(
+                f"update disabled local_version_path={self.local_version_path} "
+                f"local_version={self.current_version} channel={self.settings.channel}"
+            )
             return UpdateCheck("disabled", "自動更新未啟用。")
 
         try:
@@ -60,11 +64,14 @@ class V2Updater:
 
         self._log(
             "check result "
+            f"local_version_path={self.local_version_path} "
             f"local_version={self.current_version} remote_version={manifest.version} "
             f"channel={self.settings.channel} remote_channel={manifest.channel}"
         )
 
-        if _version_key(manifest.version) <= _version_key(self.current_version):
+        compare = _compare_versions(self.current_version, manifest.version)
+        self._log(f"compare result={compare}")
+        if compare >= 0:
             self._log("update result=current")
             return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest)
 
@@ -201,6 +208,14 @@ def _version_key(value: str) -> tuple[int, ...]:
         except ValueError:
             parts.append(0)
     return tuple(parts)
+
+
+def _compare_versions(local: str, remote: str) -> int:
+    local_key = _version_key(local)
+    remote_key = _version_key(remote)
+    if local_key == remote_key:
+        return 0
+    return 1 if local_key > remote_key else -1
 
 
 def build_replace_script(

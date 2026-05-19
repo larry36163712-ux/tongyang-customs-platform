@@ -1,8 +1,8 @@
 ﻿{
     "app_name":  "éæ´å ±éå¹³å°",
-    "version":  "1.0.1",
-    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.0.1/default.exe",
-    "sha256":  "440d11d7fd267fa9c0c2b2af2c69b51a1dfb5de27be033e46bafae03ae77d7a6",
+    "version":  "1.0.2",
+    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.0.2/default.exe",
+    "sha256":  "8e4aa77dfdcd7ae38b363e85ffdbf82b3618219f0f622fccb38726f20fb28941",
     "channel":  "stable",
-    "notes":  "Stable release v1.0.1"
+    "notes":  "Stable release v1.0.2"
 }

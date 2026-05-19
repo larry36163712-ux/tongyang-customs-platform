@@ -1,5 +1,5 @@
 ﻿{
-    "version":  "1.0.1",
+    "version":  "1.0.2",
     "update":  {
                    "enabled":  true,
                    "check_on_startup":  true,
