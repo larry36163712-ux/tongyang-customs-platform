@@ -16,6 +16,7 @@ class DocumentType(str, Enum):
 
 class CanonicalField(str, Enum):
     QUANTITY = "quantity"
+    PACKAGE_COUNT = "package_count"
     UNIT = "unit"
     ITEM_NO = "item_no"
     DESCRIPTION = "description"
@@ -26,6 +27,12 @@ class CanonicalField(str, Enum):
     ORIGIN = "origin"
     CUSTOMER = "customer"
     SUPPLIER = "supplier"
+
+
+class CheckStatus(str, Enum):
+    MATCH = "一致"
+    MISMATCH = "不一致"
+    MISSING = "缺少欄位"
 
 
 @dataclass(frozen=True)
@@ -72,3 +79,20 @@ class BacktestMetric:
     value: str
     trend: str
 
+
+@dataclass
+class CheckResult:
+    field: CanonicalField
+    status: CheckStatus
+    invoice_value: str = ""
+    packing_value: str = ""
+    message: str = ""
+
+
+@dataclass
+class DocumentCheckReport:
+    status: CheckStatus
+    summary: str
+    invoice: ParsedDocument
+    packing: ParsedDocument
+    results: list[CheckResult] = field(default_factory=list)

@@ -13,13 +13,14 @@ class SemanticParserEngine:
     """
 
     FIELD_ALIASES: tuple[SemanticAlias, ...] = (
-        SemanticAlias(CanonicalField.QUANTITY, ("qty", "quantity", "pcs", "數量", "件數")),
+        SemanticAlias(CanonicalField.QUANTITY, ("qty", "quantity", "pcs", "數量")),
+        SemanticAlias(CanonicalField.PACKAGE_COUNT, ("packages", "package", "carton", "ctn", "件數", "箱數")),
         SemanticAlias(CanonicalField.UNIT, ("unit", "uom", "單位")),
         SemanticAlias(CanonicalField.ITEM_NO, ("item", "item no", "part no", "品號", "料號")),
-        SemanticAlias(CanonicalField.DESCRIPTION, ("description", "goods", "品名", "貨名")),
-        SemanticAlias(CanonicalField.GROSS_WEIGHT, ("gross weight", "gw", "毛重")),
-        SemanticAlias(CanonicalField.NET_WEIGHT, ("net weight", "nw", "淨重")),
-        SemanticAlias(CanonicalField.AMOUNT, ("amount", "total", "金額")),
+        SemanticAlias(CanonicalField.DESCRIPTION, ("description", "goods", "commodity", "品名", "貨名")),
+        SemanticAlias(CanonicalField.GROSS_WEIGHT, ("gross weight", "g w", "gw", "毛重")),
+        SemanticAlias(CanonicalField.NET_WEIGHT, ("net weight", "n w", "nw", "淨重")),
+        SemanticAlias(CanonicalField.AMOUNT, ("amount", "total amount", "total", "value", "金額")),
         SemanticAlias(CanonicalField.CURRENCY, ("currency", "幣別")),
         SemanticAlias(CanonicalField.ORIGIN, ("origin", "country of origin", "產地")),
         SemanticAlias(CanonicalField.CUSTOMER, ("customer", "buyer", "客戶", "買方")),
@@ -49,24 +50,13 @@ class SemanticParserEngine:
                 return alias.canonical
         return None
 
-    def parse_preview(self, text: str, customer: str = "", supplier: str = "") -> ParsedDocument:
+    def parse_document(self, text: str, customer: str = "", supplier: str = "") -> ParsedDocument:
         document_type = self.classify_document(text)
         fields: list[ParsedField] = []
         for line in text.splitlines():
-            if ":" not in line:
-                continue
-            label, value = line.split(":", 1)
-            canonical = self.map_label(label)
-            if canonical:
-                fields.append(
-                    ParsedField(
-                        canonical=canonical,
-                        source_label=label.strip(),
-                        value=value.strip(),
-                        confidence=0.72,
-                        evidence=line.strip(),
-                    )
-                )
+            parsed = self._parse_line(line)
+            if parsed:
+                fields.append(parsed)
 
         warnings = []
         if not fields:
@@ -81,3 +71,40 @@ class SemanticParserEngine:
             warnings=warnings,
         )
 
+    def parse_preview(self, text: str, customer: str = "", supplier: str = "") -> ParsedDocument:
+        return self.parse_document(text, customer, supplier)
+
+    def _parse_line(self, line: str) -> ParsedField | None:
+        raw = line.strip()
+        if not raw:
+            return None
+
+        label = ""
+        value = ""
+        for separator in (":", "：", "\t"):
+            if separator in raw:
+                label, value = raw.split(separator, 1)
+                break
+        if not label:
+            match = re.match(r"^([A-Za-z\u4e00-\u9fff ./_-]{2,35})\s{2,}(.+)$", raw)
+            if match:
+                label, value = match.group(1), match.group(2)
+
+        if not label:
+            return self._detect_inline_field(raw)
+
+        canonical = self.map_label(label)
+        if not canonical:
+            return None
+        return ParsedField(canonical, label.strip(), value.strip(), 0.78, raw)
+
+    def _detect_inline_field(self, line: str) -> ParsedField | None:
+        normalized = line.casefold()
+        for alias in self.FIELD_ALIASES:
+            for term in alias.aliases:
+                if term.casefold() not in normalized:
+                    continue
+                value = re.sub(re.escape(term), "", line, count=1, flags=re.IGNORECASE).strip(" :-：")
+                if value:
+                    return ParsedField(alias.canonical, term, value, 0.62, line)
+        return None
