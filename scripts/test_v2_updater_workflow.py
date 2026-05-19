@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 import tempfile
 import sys
@@ -111,6 +112,56 @@ def main() -> None:
         raise RuntimeError("old process was not closed")
     if sha256(running_current) != running_expected:
         raise RuntimeError("running current exe was not replaced")
+
+    manifest_current = work_dir / "manifest-current.exe"
+    manifest_update = work_dir / "manifest-update.exe"
+    manifest_backup = work_dir / "manifest-current.rollback.exe"
+    staged_manifest = work_dir / "staged-version.json"
+    local_manifest = work_dir / "config" / "version.json"
+    settings_file = work_dir / "config" / "v2_settings.json"
+    manifest_script = work_dir / "update-manifest.bat"
+    manifest_current.write_bytes(old_exe.read_bytes())
+    manifest_update.write_bytes(new_exe.read_bytes())
+    staged_manifest.write_text(
+        json.dumps(
+            {
+                "app_name": "通洋報關平台",
+                "version": "9.9.9",
+                "download_url": "local",
+                "sha256": sha256(manifest_update),
+                "channel": "stable",
+                "notes": "test",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    settings_file.write_text(json.dumps({"version": "1.0.0", "update": {"channel": "stable"}}, indent=2), encoding="utf-8")
+    code = run_script(
+        build_replace_script(
+            manifest_current,
+            manifest_update,
+            manifest_backup,
+            log,
+            sha256(manifest_update),
+            old_pid=0,
+            staged_manifest=staged_manifest,
+            local_manifest=local_manifest,
+            settings_file=settings_file,
+            restart=False,
+            cleanup=False,
+        ),
+        manifest_script,
+    )
+    if code != 0:
+        raise RuntimeError(f"manifest sync script failed: {code}")
+    if json.loads(local_manifest.read_text(encoding="utf-8"))["version"] != "9.9.9":
+        raise RuntimeError("local manifest version was not synced")
+    if json.loads(settings_file.read_text(encoding="utf-8-sig"))["version"] != "9.9.9":
+        raise RuntimeError("settings version was not synced")
 
     restart_current = work_dir / "restart-current.exe"
     restart_update = work_dir / "restart-update.exe"

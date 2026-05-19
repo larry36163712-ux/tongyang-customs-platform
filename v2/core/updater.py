@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from v2.core.settings import UpdateSettings, app_base_dir, logs_dir
+from v2.core.settings import UpdateSettings, app_base_dir, local_manifest_path, logs_dir, settings_path
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,16 @@ class UpdateManifest:
     sha256: str
     channel: str
     notes: str = ""
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "app_name": "通洋報關平台",
+            "version": self.version,
+            "download_url": self.download_url,
+            "sha256": self.sha256,
+            "channel": self.channel,
+            "notes": self.notes,
+        }
 
 
 @dataclass(frozen=True)
@@ -39,7 +49,7 @@ class V2Updater:
 
     def check(self) -> UpdateCheck:
         if not self.settings.enabled:
-            self._log("update disabled")
+            self._log(f"update disabled local_version={self.current_version} channel={self.settings.channel}")
             return UpdateCheck("disabled", "自動更新未啟用。")
 
         try:
@@ -48,21 +58,34 @@ class V2Updater:
             self._log(f"manifest load failed: {exc}")
             return UpdateCheck("error", f"更新檢查失敗：{exc}")
 
+        self._log(
+            "check result "
+            f"local_version={self.current_version} remote_version={manifest.version} "
+            f"channel={self.settings.channel} remote_channel={manifest.channel}"
+        )
+
         if _version_key(manifest.version) <= _version_key(self.current_version):
-            self._log(f"current version ok: current={self.current_version} latest={manifest.version}")
+            self._log("update result=current")
             return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest)
 
-        self._log(f"update available: current={self.current_version} latest={manifest.version}")
+        self._log("update result=available")
         return UpdateCheck("available", f"發現新版 {manifest.version}。", manifest)
 
     def apply(self, manifest: UpdateManifest) -> UpdateCheck:
         try:
             downloaded = self._download(manifest)
-            self._schedule_replace(downloaded)
+            staged_manifest = self._stage_manifest(manifest)
+            self._schedule_replace(downloaded, staged_manifest)
         except Exception as exc:
             self._log(f"apply failed: {exc}")
             return UpdateCheck("error", f"更新失敗，已保留目前版本：{exc}", manifest)
         return UpdateCheck("restarting", f"已下載新版 {manifest.version}，即將重新啟動。", manifest)
+
+    def _stage_manifest(self, manifest: UpdateManifest) -> Path:
+        target = Path(tempfile.gettempdir()) / "AI_Customs_ERP_V2.version.json"
+        target.write_text(json.dumps(manifest.as_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        self._log(f"staged manifest={target} version={manifest.version} channel={manifest.channel}")
+        return target
 
     def _load_manifest(self) -> UpdateManifest:
         if self.settings.channel == "beta":
@@ -112,7 +135,7 @@ class V2Updater:
             raise RuntimeError("新版 EXE SHA256 驗證失敗")
         return target
 
-    def _schedule_replace(self, update_exe: Path) -> None:
+    def _schedule_replace(self, update_exe: Path, staged_manifest: Path) -> None:
         if not getattr(sys, "frozen", False):
             raise RuntimeError("目前不是 EXE 執行狀態，略過自動覆蓋")
 
@@ -126,6 +149,9 @@ class V2Updater:
             log_path=self.log_path,
             expected_sha256=hashlib.sha256(update_exe.read_bytes()).hexdigest().lower(),
             old_pid=os.getpid(),
+            staged_manifest=staged_manifest,
+            local_manifest=local_manifest_path(),
+            settings_file=settings_path(),
             restart=True,
             cleanup=True,
         )
@@ -184,6 +210,9 @@ def build_replace_script(
     log_path: Path,
     expected_sha256: str,
     old_pid: int,
+    staged_manifest: Path | None = None,
+    local_manifest: Path | None = None,
+    settings_file: Path | None = None,
     restart: bool = True,
     cleanup: bool = True,
 ) -> str:
@@ -194,10 +223,26 @@ def build_replace_script(
     )
     cleanup_lines = (
         'del /f /q "%UPDATE%" >> "%LOG%" 2>&1\n'
+        'if defined STAGED_MANIFEST del /f /q "%STAGED_MANIFEST%" >> "%LOG%" 2>&1\n'
         'del /f /q "%BACKUP%" >> "%LOG%" 2>&1'
         if cleanup
         else 'echo [%date% %time%] cleanup skipped >> "%LOG%"'
     )
+    manifest_env = ""
+    manifest_sync = 'echo [%date% %time%] manifest sync skipped >> "%LOG%"'
+    if staged_manifest and local_manifest and settings_file:
+        manifest_env = f"""set "STAGED_MANIFEST={staged_manifest}"
+set "LOCAL_MANIFEST={local_manifest}"
+set "SETTINGS_FILE={settings_file}"
+"""
+        manifest_sync = r"""if exist "%STAGED_MANIFEST%" (
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:LOCAL_MANIFEST) | Out-Null; New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:SETTINGS_FILE) | Out-Null" >> "%LOG%" 2>&1
+  copy /y "%STAGED_MANIFEST%" "%LOCAL_MANIFEST%" >> "%LOG%" 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$manifest = Get-Content -LiteralPath $env:LOCAL_MANIFEST -Raw | ConvertFrom-Json; $settingsPath = $env:SETTINGS_FILE; if (Test-Path -LiteralPath $settingsPath) { $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json } else { $settings = [pscustomobject]@{} }; $settings | Add-Member -Force -NotePropertyName version -NotePropertyValue ([string]$manifest.version); if (-not $settings.PSObject.Properties['update']) { $settings | Add-Member -NotePropertyName update -NotePropertyValue ([pscustomobject]@{}) }; $settings.update | Add-Member -Force -NotePropertyName channel -NotePropertyValue ([string]$manifest.channel); $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding UTF8" >> "%LOG%" 2>&1
+  echo [%date% %time%] manifest synced >> "%LOG%"
+) else (
+  echo [%date% %time%] staged manifest missing >> "%LOG%"
+)"""
     return f"""@echo off
 setlocal EnableExtensions
 set "CURRENT={current_exe}"
@@ -206,6 +251,7 @@ set "BACKUP={backup_exe}"
 set "LOG={log_path}"
 set "EXPECTED_SHA={expected_sha256.lower()}"
 set "OLD_PID={old_pid}"
+{manifest_env}
 
 if not exist "%~dp0" mkdir "%~dp0" > nul 2>&1
 if not exist "%LOG%" type nul > "%LOG%"
@@ -242,6 +288,7 @@ if /i not "%ACTUAL_SHA%"=="%EXPECTED_SHA%" (
 )
 
 echo [%date% %time%] replace verified >> "%LOG%"
+{manifest_sync}
 {restart_line}
 {cleanup_lines}
 echo [%date% %time%] update replace completed >> "%LOG%"

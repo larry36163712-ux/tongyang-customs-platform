@@ -35,6 +35,12 @@ def settings_path() -> Path:
     return config_dir / "v2_settings.json"
 
 
+def local_manifest_path() -> Path:
+    config_dir = app_base_dir() / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / "version.json"
+
+
 def logs_dir() -> Path:
     path = app_base_dir() / "logs"
     path.mkdir(parents=True, exist_ok=True)
@@ -48,10 +54,10 @@ def load_settings() -> V2Settings:
         save_settings(settings)
         return settings
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     update_data = data.get("update", {})
     return V2Settings(
-        version=str(data.get("version", "1.0.0")),
+        version=resolve_local_version(str(data.get("version", "1.0.0"))),
         update=UpdateSettings(
             enabled=bool(update_data.get("enabled", True)),
             check_on_startup=bool(update_data.get("check_on_startup", True)),
@@ -70,3 +76,17 @@ def load_settings() -> V2Settings:
 def save_settings(settings: V2Settings) -> None:
     path = settings_path()
     path.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def resolve_local_version(default: str = "1.0.0") -> str:
+    for path in (local_manifest_path(), app_base_dir() / "version.json"):
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        version = str(data.get("version", "")).strip()
+        if version:
+            return version
+    return default
