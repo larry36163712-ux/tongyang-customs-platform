@@ -1,0 +1,90 @@
+name: Build and publish Windows EXE
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number, for example 1.0.1"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: vars
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+            $tag = "v$version"
+          } else {
+            $settings = Get-Content settings.json -Raw | ConvertFrom-Json
+            $baseVersion = $settings.version
+            $version = "$baseVersion.${{ github.run_number }}"
+            $tag = "v$version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Update bundled version files
+        shell: pwsh
+        run: |
+          $version = "${{ steps.vars.outputs.version }}"
+          $settings = Get-Content settings.json -Raw | ConvertFrom-Json
+          $settings.version = $version
+          $settings | ConvertTo-Json -Depth 20 | Set-Content settings.json -Encoding UTF8
+          $manifest = Get-Content version.json -Raw | ConvertFrom-Json
+          $manifest.version = $version
+          $manifest | ConvertTo-Json -Depth 20 | Set-Content version.json -Encoding UTF8
+
+      - name: Create or update tag
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ steps.vars.outputs.tag }}" "${{ github.sha }}"
+          git push origin -f "${{ steps.vars.outputs.tag }}"
+
+      - name: Build onefile EXE
+        shell: pwsh
+        run: .\build_exe.ps1
+
+      - name: Generate version.json
+        run: >
+          python scripts/make_release_manifest.py
+          --repo "${{ github.repository }}"
+          --tag "${{ steps.vars.outputs.tag }}"
+          --version "${{ steps.vars.outputs.version }}"
+          --exe "dist/通洋報關平台.exe"
+          --output "dist/version.json"
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: 通洋報關平台 ${{ steps.vars.outputs.version }}
+          make_latest: true
+          files: |
+            dist/通洋報關平台.exe
+            dist/version.json

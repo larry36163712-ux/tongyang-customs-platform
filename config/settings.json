@@ -1,0 +1,38 @@
+{
+  "app_name": "通洋報關平台",
+  "version": "1.0.0",
+  "release_methods": ["C1", "C2", "C3M", "C3X"],
+  "uploads_dir": "uploads",
+  "exports_dir": "exports",
+  "logs_dir": "logs",
+  "database_dir": "database",
+  "parser_cache_dir": "parser_cache",
+  "templates_dir": "templates",
+  "retention_days": {
+    "uploads": 30,
+    "logs": 90,
+    "parser_cache": 7
+  },
+  "update": {
+    "enabled": true,
+    "version_url": "config/version.json",
+    "check_on_startup": true
+  },
+  "sync": {
+    "enabled": true,
+    "source_dir": "sync_source",
+    "targets": ["templates", "app/parser/templates"]
+  },
+  "freight_rules": {
+    "tong_ying_export_vietnam_cfs": {
+      "currency": "TWD",
+      "cbm_threshold": 5,
+      "freight_lte_threshold": 6000,
+      "freight_gt_threshold": 8000
+    }
+  },
+  "insurance": {
+    "multiplier": 1.1,
+    "minimum_premium_twd": 400
+  }
+}
