@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+build/
+dist/
+
+logs/
+parser_cache/
+exports/
+uploads/
+database/
+sync_source/
+
+*.log
