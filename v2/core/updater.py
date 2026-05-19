@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -120,32 +119,16 @@ class V2Updater:
         current_exe = Path(sys.executable).resolve()
         backup_exe = current_exe.with_suffix(".rollback.exe")
         script_path = Path(tempfile.gettempdir()) / "AI_Customs_ERP_V2_update.bat"
-        log_path = self.log_path
-
-        script = f"""@echo off
-setlocal
-set CURRENT={current_exe}
-set UPDATE={update_exe}
-set BACKUP={backup_exe}
-set LOG={log_path}
-echo [%date% %time%] update replace started >> "%LOG%"
-ping 127.0.0.1 -n 3 > nul
-if exist "%BACKUP%" del /f /q "%BACKUP%"
-copy /y "%CURRENT%" "%BACKUP%" >> "%LOG%" 2>&1
-copy /y "%UPDATE%" "%CURRENT%" >> "%LOG%" 2>&1
-if errorlevel 1 (
-  echo [%date% %time%] replace failed, rollback >> "%LOG%"
-  copy /y "%BACKUP%" "%CURRENT%" >> "%LOG%" 2>&1
-  start "" "%CURRENT%"
-  exit /b 1
-)
-start "" "%CURRENT%"
-ping 127.0.0.1 -n 4 > nul
-del /f /q "%UPDATE%" >> "%LOG%" 2>&1
-del /f /q "%BACKUP%" >> "%LOG%" 2>&1
-echo [%date% %time%] update replace completed >> "%LOG%"
-exit /b 0
-"""
+        script = build_replace_script(
+            current_exe=current_exe,
+            update_exe=update_exe,
+            backup_exe=backup_exe,
+            log_path=self.log_path,
+            expected_sha256=hashlib.sha256(update_exe.read_bytes()).hexdigest().lower(),
+            old_pid=os.getpid(),
+            restart=True,
+            cleanup=True,
+        )
         script_path.write_text(script, encoding="utf-8")
         self._log(f"scheduled replace script={script_path}")
         subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=subprocess.CREATE_NO_WINDOW)
@@ -192,3 +175,85 @@ def _version_key(value: str) -> tuple[int, ...]:
         except ValueError:
             parts.append(0)
     return tuple(parts)
+
+
+def build_replace_script(
+    current_exe: Path,
+    update_exe: Path,
+    backup_exe: Path,
+    log_path: Path,
+    expected_sha256: str,
+    old_pid: int,
+    restart: bool = True,
+    cleanup: bool = True,
+) -> str:
+    restart_line = (
+        'for /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath $env:CURRENT -PassThru; $p.Id"`) do echo [%date% %time%] restart pid=%%p >> "%LOG%"'
+        if restart
+        else 'echo [%date% %time%] restart skipped >> "%LOG%"'
+    )
+    cleanup_lines = (
+        'del /f /q "%UPDATE%" >> "%LOG%" 2>&1\n'
+        'del /f /q "%BACKUP%" >> "%LOG%" 2>&1'
+        if cleanup
+        else 'echo [%date% %time%] cleanup skipped >> "%LOG%"'
+    )
+    return f"""@echo off
+setlocal EnableExtensions
+set "CURRENT={current_exe}"
+set "UPDATE={update_exe}"
+set "BACKUP={backup_exe}"
+set "LOG={log_path}"
+set "EXPECTED_SHA={expected_sha256.lower()}"
+set "OLD_PID={old_pid}"
+
+if not exist "%~dp0" mkdir "%~dp0" > nul 2>&1
+if not exist "%LOG%" type nul > "%LOG%"
+echo [%date% %time%] update replace started >> "%LOG%"
+
+if not "%OLD_PID%"=="0" (
+  taskkill /PID %OLD_PID% /T /F >> "%LOG%" 2>&1
+)
+
+for /l %%i in (1,1,30) do (
+  copy /y "%CURRENT%" "%BACKUP%" >> "%LOG%" 2>&1
+  if not errorlevel 1 goto backup_done
+  ping 127.0.0.1 -n 2 > nul
+)
+echo [%date% %time%] backup failed >> "%LOG%"
+goto rollback
+
+:backup_done
+copy /y "%UPDATE%" "%CURRENT%" >> "%LOG%" 2>&1
+if errorlevel 1 (
+  echo [%date% %time%] replace copy failed >> "%LOG%"
+  goto rollback
+)
+if not exist "%CURRENT%" (
+  echo [%date% %time%] current exe missing after replace >> "%LOG%"
+  goto rollback
+)
+
+for /f "usebackq delims=" %%h in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath $env:CURRENT).Hash.ToLower()"`) do set "ACTUAL_SHA=%%h"
+echo [%date% %time%] replaced sha256=%ACTUAL_SHA% >> "%LOG%"
+if /i not "%ACTUAL_SHA%"=="%EXPECTED_SHA%" (
+  echo [%date% %time%] sha256 mismatch, rollback >> "%LOG%"
+  goto rollback
+)
+
+echo [%date% %time%] replace verified >> "%LOG%"
+{restart_line}
+{cleanup_lines}
+echo [%date% %time%] update replace completed >> "%LOG%"
+exit /b 0
+
+:rollback
+if exist "%BACKUP%" (
+  copy /y "%BACKUP%" "%CURRENT%" >> "%LOG%" 2>&1
+)
+if exist "%CURRENT%" (
+  {restart_line}
+)
+echo [%date% %time%] update rollback completed >> "%LOG%"
+exit /b 1
+"""
