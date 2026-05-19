@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -25,7 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from v2.core.backtesting import BacktestAnalyticsService
-from v2.core.checking import InvoicePackingChecker
+from v2.core.checking import DeclarationDocumentChecker
+from v2.core.document_loader import DocumentLoader, LoadedDocument
 from v2.core.ds2_gateway import Ds2Gateway
 from v2.core.models import CheckStatus, ParsedDocument
 from v2.core.parser_engine import SemanticParserEngine
@@ -33,6 +35,35 @@ from v2.core.print_workflow import RELEASE_METHODS, ImportPrintWorkflow
 from v2.core.settings import V2Settings, load_settings, save_settings
 from v2.core.template_learning import CustomerTemplateLearningService
 from v2.core.updater import UpdateCheck, V2Updater
+
+
+class DocumentDropList(QListWidget):
+    files_dropped = Signal(list)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setAcceptDrops(True)
+        self.setObjectName("UploadList")
+
+    def dragEnterEvent(self, event) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:  # type: ignore[override]
+        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
 
 
 class CustomsErpWindow(QMainWindow):
@@ -43,7 +74,8 @@ class CustomsErpWindow(QMainWindow):
 
         self.settings: V2Settings = load_settings()
         self.parser = SemanticParserEngine()
-        self.checker = InvoicePackingChecker(self.parser)
+        self.loader = DocumentLoader(self.parser)
+        self.checker = DeclarationDocumentChecker(self.parser)
         self.templates = CustomerTemplateLearningService()
         self.analytics = BacktestAnalyticsService(self.templates)
         self.ds2 = Ds2Gateway()
@@ -54,6 +86,7 @@ class CustomsErpWindow(QMainWindow):
         self.release_group = QButtonGroup(self)
         self.print_status = QLabel()
         self.update_status = QLabel()
+        self.loaded_documents: list[LoadedDocument] = []
 
         self._build_menu()
         self._build_shell()
@@ -124,19 +157,28 @@ class CustomsErpWindow(QMainWindow):
 
         header = QLabel("進口核對")
         header.setObjectName("PageTitle")
-        desc = QLabel("INV vs PKG 語意 parser 與基礎欄位核對。")
+        desc = QLabel("以 DS2 報單為核心，比對 INV / PKG / B/L / 到貨通知 / 清表。")
         desc.setObjectName("Muted")
         layout.addWidget(header)
         layout.addWidget(desc)
 
-        input_row = QHBoxLayout()
-        invoice_text = QTextEdit()
-        invoice_text.setPlaceholderText("貼上 INV 文字\nQuantity: 120 PCS\nNet Weight: 400\nAmount: USD 5000")
-        packing_text = QTextEdit()
-        packing_text.setPlaceholderText("貼上 PKG 文字\nQTY: 120 PCS\nNW: 400\nGW: 450")
-        input_row.addWidget(invoice_text)
-        input_row.addWidget(packing_text)
-        layout.addLayout(input_row)
+        upload_row = QHBoxLayout()
+        upload_list = DocumentDropList()
+        upload_list.setMinimumHeight(170)
+        upload_list.addItem("拖曳 DS2報單 / INV / PKG / B/L / 到貨通知 / 清表 到這裡")
+        upload_list.addItem("支援 PDF、TXT、CSV、TSV；DS2 先使用 PDF 或匯出檔")
+        upload_actions = QVBoxLayout()
+        choose_button = QPushButton("選擇文件")
+        clear_button = QPushButton("清空列表")
+        upload_hint = QLabel("尚未載入文件")
+        upload_hint.setObjectName("Muted")
+        upload_actions.addWidget(choose_button)
+        upload_actions.addWidget(clear_button)
+        upload_actions.addWidget(upload_hint)
+        upload_actions.addStretch(1)
+        upload_row.addWidget(upload_list, 1)
+        upload_row.addLayout(upload_actions)
+        layout.addLayout(upload_row)
 
         action_row = QHBoxLayout()
         run_button = QPushButton("執行核對")
@@ -157,7 +199,10 @@ class CustomsErpWindow(QMainWindow):
         result_row.addWidget(parser_debug)
         layout.addLayout(result_row, 1)
 
-        run_button.clicked.connect(lambda: self._run_import_check(invoice_text, packing_text, summary, diff_list, parser_debug))
+        upload_list.files_dropped.connect(lambda paths: self._add_documents(paths, upload_list, upload_hint, parser_debug))
+        choose_button.clicked.connect(lambda: self._choose_documents(upload_list, upload_hint, parser_debug))
+        clear_button.clicked.connect(lambda: self._clear_documents(upload_list, upload_hint, diff_list, parser_debug, summary))
+        run_button.clicked.connect(lambda: self._run_import_check(summary, diff_list, parser_debug))
         return page
 
     def _review_page(self, title: str, description: str) -> QWidget:
@@ -255,36 +300,91 @@ class CustomsErpWindow(QMainWindow):
 
     def _run_import_check(
         self,
-        invoice_text: QTextEdit,
-        packing_text: QTextEdit,
         summary: QLabel,
         diff_list: QTextEdit,
         parser_debug: QTextEdit,
     ) -> None:
-        report = self.checker.check_texts(invoice_text.toPlainText(), packing_text.toPlainText())
+        report = self.checker.check_documents([item.parsed for item in self.loaded_documents])
         summary.setText(f"{report.status.value} - {report.summary}")
         summary.setObjectName("StatusOk" if report.status == CheckStatus.MATCH else "StatusFail")
         summary.style().unpolish(summary)
         summary.style().polish(summary)
 
-        diff_lines = ["差異列表:"]
+        diff_lines = ["核對結果:"]
+        if report.high_risk_warnings:
+            diff_lines.append("")
+            diff_lines.append("高風險 warning:")
+            diff_lines.extend(f"- {warning}" for warning in report.high_risk_warnings)
+            diff_lines.append("")
         for result in report.results:
+            values = " | ".join(f"{name}={value}" for name, value in result.document_values.items()) or "-"
             diff_lines.append(
-                f"- {result.status.value} | {result.message} | INV={result.invoice_value or '-'} | PKG={result.packing_value or '-'}"
+                f"- {result.status.value} | {result.message} | DS2={result.declaration_value or '-'} | 文件={values}"
             )
         diff_list.setText("\n".join(diff_lines))
 
-        parser_debug.setText(
-            "\n\n".join(
-                (
-                    "INV parser debug:\n" + self._format_parsed_document(report.invoice),
-                    "PKG parser debug:\n" + self._format_parsed_document(report.packing),
-                )
-            )
+        parser_debug.setText(self._format_debug_documents([item.parsed for item in self.loaded_documents]))
+
+    def _choose_documents(self, upload_list: DocumentDropList, upload_hint: QLabel, parser_debug: QTextEdit) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "選擇核對文件",
+            "",
+            "Documents (*.pdf *.txt *.csv *.tsv);;All Files (*.*)",
         )
+        if paths:
+            self._add_documents(paths, upload_list, upload_hint, parser_debug)
+
+    def _add_documents(
+        self,
+        paths: list[str],
+        upload_list: DocumentDropList,
+        upload_hint: QLabel,
+        parser_debug: QTextEdit,
+    ) -> None:
+        loaded = self.loader.load_paths(paths)
+        existing = {str(item.path) for item in self.loaded_documents}
+        self.loaded_documents.extend(item for item in loaded if str(item.path) not in existing)
+        self._refresh_upload_list(upload_list, upload_hint)
+        parser_debug.setText(self._format_debug_documents([item.parsed for item in self.loaded_documents]))
+
+    def _clear_documents(
+        self,
+        upload_list: DocumentDropList,
+        upload_hint: QLabel,
+        diff_list: QTextEdit,
+        parser_debug: QTextEdit,
+        summary: QLabel,
+    ) -> None:
+        self.loaded_documents.clear()
+        upload_list.clear()
+        upload_list.addItem("拖曳 DS2報單 / INV / PKG / B/L / 到貨通知 / 清表 到這裡")
+        upload_list.addItem("支援 PDF、TXT、CSV、TSV；DS2 先使用 PDF 或匯出檔")
+        upload_hint.setText("尚未載入文件")
+        diff_list.clear()
+        parser_debug.clear()
+        summary.setText("尚未核對")
+        summary.setObjectName("StatusNeutral")
+        summary.style().unpolish(summary)
+        summary.style().polish(summary)
+
+    def _refresh_upload_list(self, upload_list: DocumentDropList, upload_hint: QLabel) -> None:
+        upload_list.clear()
+        for item in self.loaded_documents:
+            upload_list.addItem(f"{item.parsed.document_type.value} | {item.path.name} | fields={len(item.parsed.fields)}")
+        upload_hint.setText(f"已載入 {len(self.loaded_documents)} 份文件")
+
+    def _format_debug_documents(self, documents: list[ParsedDocument]) -> str:
+        if not documents:
+            return "尚未載入文件。"
+        return "\n\n".join(self._format_parsed_document(document) for document in documents)
 
     def _format_parsed_document(self, document: ParsedDocument) -> str:
-        lines = [f"type={document.document_type.value}", f"template={document.template_id}"]
+        lines = [
+            f"source={document.source_name or '-'}",
+            f"type={document.document_type.value}",
+            f"template={document.template_id}",
+        ]
         for field in document.fields:
             lines.append(
                 f"- {field.canonical.value}: {field.value} | label={field.source_label} | confidence={field.confidence} | evidence={field.evidence}"

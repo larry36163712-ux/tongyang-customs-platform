@@ -6,12 +6,16 @@ from typing import Any
 
 
 class DocumentType(str, Enum):
+    DS2_DECLARATION = "DS2報單"
     INVOICE = "INV"
     PACKING_LIST = "PKG"
     BILL_OF_LADING = "B/L"
+    ARRIVAL_NOTICE = "到貨通知"
+    CLEARANCE_LIST = "清表"
     DATA_CLEARANCE = "資料清表"
     MATERIAL_CLEARANCE = "用料清表"
     DRAWBACK_CLEARANCE = "核退清表"
+    UNKNOWN = "未分類"
 
 
 class CanonicalField(str, Enum):
@@ -24,6 +28,11 @@ class CanonicalField(str, Enum):
     NET_WEIGHT = "net_weight"
     AMOUNT = "amount"
     CURRENCY = "currency"
+    HS_CODE = "hs_code"
+    PORT = "port"
+    CONTAINER_NO = "container_no"
+    SEAL_NO = "seal_no"
+    VESSEL_VOYAGE = "vessel_voyage"
     ORIGIN = "origin"
     CUSTOMER = "customer"
     SUPPLIER = "supplier"
@@ -33,6 +42,7 @@ class CheckStatus(str, Enum):
     MATCH = "一致"
     MISMATCH = "不一致"
     MISSING = "缺少欄位"
+    HIGH_RISK = "高風險 warning"
 
 
 @dataclass(frozen=True)
@@ -56,6 +66,7 @@ class ParsedDocument:
     customer: str
     supplier: str
     template_id: str
+    source_name: str = ""
     fields: list[ParsedField] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     raw_metadata: dict[str, Any] = field(default_factory=dict)
@@ -84,15 +95,17 @@ class BacktestMetric:
 class CheckResult:
     field: CanonicalField
     status: CheckStatus
-    invoice_value: str = ""
-    packing_value: str = ""
+    declaration_value: str = ""
+    document_values: dict[str, str] = field(default_factory=dict)
     message: str = ""
+    risk_level: str = "normal"
 
 
 @dataclass
 class DocumentCheckReport:
     status: CheckStatus
     summary: str
-    invoice: ParsedDocument
-    packing: ParsedDocument
+    declaration: ParsedDocument | None
+    documents: list[ParsedDocument] = field(default_factory=list)
     results: list[CheckResult] = field(default_factory=list)
+    high_risk_warnings: list[str] = field(default_factory=list)
