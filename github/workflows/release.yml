@@ -68,7 +68,9 @@ jobs:
 
       - name: Build onefile EXE
         shell: pwsh
-        run: .\build_exe.ps1
+        run: |
+          .\build_exe.ps1
+          Copy-Item -Force "dist\通洋報關平台.exe" "dist\default.exe"
 
       - name: Generate version.json
         run: >
@@ -76,7 +78,7 @@ jobs:
           --repo "${{ github.repository }}"
           --tag "${{ steps.vars.outputs.tag }}"
           --version "${{ steps.vars.outputs.version }}"
-          --exe "dist/通洋報關平台.exe"
+          --exe "dist/default.exe"
           --output "dist/version.json"
 
       - name: Create or update GitHub Release
@@ -86,5 +88,5 @@ jobs:
           name: 通洋報關平台 ${{ steps.vars.outputs.version }}
           make_latest: true
           files: |
-            dist/通洋報關平台.exe
+            dist/default.exe
             dist/version.json

@@ -10,7 +10,7 @@ https://github.com/larry36163712-ux/tongyang-customs-platform
 
 https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json
 
-`version.json` 會指向同一個 Release 裡的 `通洋報關平台.exe`，並包含 SHA256。
+`version.json` 會指向同一個 Release 裡的 `default.exe`，並包含 SHA256。
 
 ## 發布第一個正式版本
 
@@ -21,7 +21,7 @@ https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/do
 5. 輸入版本號，例如 `1.0.0`。
 6. 等待 workflow 完成。
 7. 到 `Releases` 確認有兩個 asset：
-   - `通洋報關平台.exe`
+   - `default.exe`
    - `version.json`
 
 公司電腦上的舊版程式下次啟動或按「檢查更新」時，會自動檢查 GitHub Release，下載新版 EXE，覆蓋後重新啟動。

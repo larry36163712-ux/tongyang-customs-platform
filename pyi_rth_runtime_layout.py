@@ -49,7 +49,7 @@ if getattr(sys, "frozen", False):
             """{
   "app_name": "通洋報關平台",
   "version": "1.0.0",
-  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe",
+  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/default.exe",
   "sha256": "",
   "notes": "GitHub Releases update manifest."
 }
