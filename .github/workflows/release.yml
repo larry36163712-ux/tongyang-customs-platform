@@ -115,7 +115,7 @@ jobs:
           $exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
           $exePath = Join-Path "dist" $exeName
           $hash = (Get-FileHash -Algorithm SHA256 $exePath).Hash.ToLower()
-          Set-Content -Path "dist\SHA256.txt" -Value "$hash  $exeName" -Encoding UTF8
+          [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $exeName`n", [Text.UTF8Encoding]::new($false))
 
       - name: Create or update GitHub Release
         shell: pwsh
