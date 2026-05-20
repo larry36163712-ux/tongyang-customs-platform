@@ -1,6 +1,6 @@
 {
   "app_name": "通洋報關平台",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "release_methods": ["C1", "C2", "C3M", "C3X"],
   "uploads_dir": "uploads",
   "exports_dir": "exports",

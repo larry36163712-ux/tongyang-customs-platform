@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QRadioButton,
     QStackedWidget,
@@ -127,12 +128,18 @@ class ToastNotification(QFrame):
         self.message = QLabel()
         self.message.setObjectName("ToastMessage")
         self.message.setWordWrap(True)
+        self.progress = QProgressBar()
+        self.progress.setObjectName("ToastProgress")
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.hide()
         self.action = QPushButton("立即更新")
         self.action.setObjectName("ToastAction")
         self.action.clicked.connect(self.action_clicked.emit)
 
         layout.addWidget(self.title)
         layout.addWidget(self.message)
+        layout.addWidget(self.progress)
         layout.addWidget(self.action, 0, Qt.AlignmentFlag.AlignRight)
 
         self._timer = QTimer(self)
@@ -143,12 +150,26 @@ class ToastNotification(QFrame):
         self.title.setText(title)
         self.message.setText(message)
         self.action.setVisible(action_visible)
+        self.action.setEnabled(True)
+        self.progress.hide()
+        self.progress.setValue(0)
         self.adjustSize()
         self._reposition()
         self.show()
         self.raise_()
         if timeout_ms > 0:
             self._timer.start(timeout_ms)
+
+    def set_progress(self, title: str, message: str, percent: int) -> None:
+        self.title.setText(title)
+        self.message.setText(message)
+        self.action.setVisible(False)
+        self.progress.show()
+        self.progress.setValue(max(0, min(100, percent)))
+        self.adjustSize()
+        self._reposition()
+        self.show()
+        self.raise_()
 
     def _reposition(self) -> None:
         parent = self.parentWidget()
@@ -158,6 +179,25 @@ class ToastNotification(QFrame):
         x = parent.width() - self.width() - margin
         y = parent.height() - self.height() - margin
         self.move(max(margin, x), max(margin, y))
+
+
+class UpdateApplyWorker(QObject):
+    progress = Signal(str, int, str)
+    finished = Signal(object)
+
+    def __init__(self, version: str, settings: object, manifest: object) -> None:
+        super().__init__()
+        self.version = version
+        self.settings = settings
+        self.manifest = manifest
+
+    @Slot()
+    def run(self) -> None:
+        result = V2Updater(self.version, self.settings).apply(
+            self.manifest,
+            progress=lambda stage, percent, message: self.progress.emit(stage, percent, message),
+        )
+        self.finished.emit(result)
 
 
 class CustomsErpWindow(QMainWindow):
@@ -186,6 +226,8 @@ class CustomsErpWindow(QMainWindow):
         self.status_version = QLabel()
         self.status_update = QLabel()
         self.toast: ToastNotification | None = None
+        self.update_thread: QThread | None = None
+        self.update_worker: UpdateApplyWorker | None = None
 
         self._build_menu()
         self._build_shell()
@@ -595,17 +637,50 @@ class CustomsErpWindow(QMainWindow):
         if not self.latest_update or not self.latest_update.manifest:
             self._show_toast("更新狀態", "目前沒有可套用的新版資訊，請重新檢查更新。", action_visible=False, timeout_ms=5000)
             return
+        if self.update_thread and self.update_thread.isRunning():
+            self._show_toast("正在更新", "更新流程正在執行中。", action_visible=False, timeout_ms=3000)
+            return
         self._write_update_progress("ui update button clicked")
         self._set_update_status("正在下載新版...", "available")
-        self._show_toast("正在更新", "下載新版並驗證 SHA256，完成後會自動重新啟動。", action_visible=False, timeout_ms=0)
         if self.toast:
-            self.toast.repaint()
-        self.repaint()
-        QApplication.processEvents()
-        apply_result = V2Updater(self.settings.version, self.settings.update).apply(self.latest_update.manifest)
+            self.toast.set_progress("正在更新", "downloading", 0)
+
+        self.update_thread = QThread(self)
+        self.update_worker = UpdateApplyWorker(self.settings.version, self.settings.update, self.latest_update.manifest)
+        self.update_worker.moveToThread(self.update_thread)
+        self.update_thread.started.connect(self.update_worker.run)
+        self.update_worker.progress.connect(self._on_update_progress)
+        self.update_worker.finished.connect(self._on_update_finished)
+        self.update_worker.finished.connect(self.update_thread.quit)
+        self.update_worker.finished.connect(self.update_worker.deleteLater)
+        self.update_thread.finished.connect(self.update_thread.deleteLater)
+        self.update_thread.finished.connect(self._clear_update_worker)
+        self.update_thread.start()
+
+    @Slot(str, int, str)
+    def _on_update_progress(self, stage: str, percent: int, message: str) -> None:
+        stage_labels = {
+            "downloading": "downloading",
+            "verifying": "verifying",
+            "replacing": "replacing",
+            "restarting": "restarting",
+        }
+        label = stage_labels.get(stage, stage)
+        self._set_update_status(label, "available")
+        if self.toast:
+            self.toast.set_progress("正在更新", f"{label} - {message}", percent)
+
+    @Slot(object)
+    def _on_update_finished(self, apply_result: UpdateCheck) -> None:
         self.settings.version = resolve_local_version(self.settings.version)
-        self._set_update_status(apply_result.message, "available")
-        self._show_toast("更新程序已啟動", apply_result.message, action_visible=False, timeout_ms=5000)
+        state = "available" if apply_result.status != "error" else "neutral"
+        self._set_update_status(apply_result.message, state)
+        self._show_toast("更新狀態", apply_result.message, action_visible=False, timeout_ms=5000)
+
+    @Slot()
+    def _clear_update_worker(self) -> None:
+        self.update_thread = None
+        self.update_worker = None
 
     def _sync_update_status(self, result: UpdateCheck) -> None:
         if result.should_show_popup:
@@ -875,6 +950,18 @@ class CustomsErpWindow(QMainWindow):
             }
             #ToastAction {
                 padding: 8px 14px;
+            }
+            #ToastProgress {
+                background: #10161D;
+                border: 1px solid #314052;
+                border-radius: 5px;
+                height: 9px;
+                text-align: center;
+                color: transparent;
+            }
+            #ToastProgress::chunk {
+                background: #F3C969;
+                border-radius: 4px;
             }
             QDialog {
                 background: #121820;

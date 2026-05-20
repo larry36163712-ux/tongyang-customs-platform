@@ -11,8 +11,11 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from v2.core.settings import UpdateSettings, local_manifest_path, logs_dir, resolve_local_version, settings_path
+
+ProgressCallback = Callable[[str, int, str], None]
 
 
 @dataclass(frozen=True)
@@ -81,14 +84,18 @@ class V2Updater:
         self._log("update result=available should_show_popup=True")
         return UpdateCheck("available", f"發現新版 {manifest.version}。", manifest, compare, True)
 
-    def apply(self, manifest: UpdateManifest) -> UpdateCheck:
+    def apply(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> UpdateCheck:
         try:
+            self._emit_progress(progress, "downloading", 0, "開始下載新版 EXE")
             self._log(f"progress download start version={manifest.version} url={manifest.download_url}")
-            downloaded = self._download(manifest)
+            downloaded = self._download(manifest, progress=progress)
             self._log(f"progress download completed path={downloaded}")
+            self._emit_progress(progress, "verifying", 90, "正在驗證 SHA256")
             self._log(f"progress verify completed sha256={manifest.sha256}")
             staged_manifest = self._stage_manifest(manifest)
+            self._emit_progress(progress, "replacing", 96, "準備覆蓋主程式")
             self._log("progress replace scheduled")
+            self._emit_progress(progress, "restarting", 100, "即將重新啟動")
             self._schedule_replace(downloaded, staged_manifest)
         except Exception as exc:
             self._log(f"apply failed: {exc}")
@@ -129,7 +136,7 @@ class V2Updater:
                 return _read_json_url(manifest_asset["browser_download_url"])
         raise RuntimeError("找不到 beta release version.json")
 
-    def _download(self, manifest: UpdateManifest) -> Path:
+    def _download(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> Path:
         if not manifest.download_url:
             raise RuntimeError("version.json 缺少 download_url")
         if not manifest.sha256:
@@ -140,7 +147,19 @@ class V2Updater:
         self._log(f"download start {manifest.download_url} -> {target}")
 
         with _open_url(manifest.download_url, timeout=120) as response:
-            target.write_bytes(response.read())
+            total = int(response.headers.get("Content-Length") or 0)
+            downloaded = 0
+            with target.open("wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    downloaded += len(chunk)
+                    percent = 0
+                    if total > 0:
+                        percent = min(89, max(1, int(downloaded * 89 / total)))
+                    self._emit_progress(progress, "downloading", percent, f"下載中 {downloaded // 1024} KB")
 
         digest = hashlib.sha256(target.read_bytes()).hexdigest().lower()
         self._log(f"verify sha256 actual={digest} expected={manifest.sha256}")
@@ -180,6 +199,11 @@ class V2Updater:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{stamp}] {message}\n")
+
+    def _emit_progress(self, progress: ProgressCallback | None, stage: str, percent: int, message: str) -> None:
+        self._log(f"progress {stage} percent={percent} message={message}")
+        if progress:
+            progress(stage, percent, message)
 
 
 def _read_json_url(url: str) -> dict | list:
