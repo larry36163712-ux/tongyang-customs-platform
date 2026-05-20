@@ -102,24 +102,42 @@ jobs:
           --repo "${{ github.repository }}"
           --tag "${{ steps.vars.outputs.tag }}"
           --version "${{ steps.vars.outputs.version }}"
-          --exe "dist/default.exe"
+          --exe "dist/通洋報關平台.exe"
           --channel "${{ steps.vars.outputs.channel }}"
           --output "dist/version.json"
 
       - name: Generate SHA256
         shell: pwsh
         run: |
-          $hash = (Get-FileHash -Algorithm SHA256 "dist\default.exe").Hash.ToLower()
-          Set-Content -Path "dist\SHA256.txt" -Value "$hash  default.exe" -Encoding UTF8
+          $hash = (Get-FileHash -Algorithm SHA256 "dist\通洋報關平台.exe").Hash.ToLower()
+          Set-Content -Path "dist\SHA256.txt" -Value "$hash  通洋報關平台.exe" -Encoding UTF8
 
       - name: Create or update GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: AI Customs ERP V2 ${{ steps.vars.outputs.version }}
-          prerelease: ${{ steps.vars.outputs.prerelease }}
-          make_latest: ${{ steps.vars.outputs.make_latest }}
-          files: |
-            dist/default.exe
-            dist/version.json
-            dist/SHA256.txt
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.vars.outputs.tag }}"
+          $title = "AI Customs ERP V2 ${{ steps.vars.outputs.version }}"
+          $notes = "${{ steps.vars.outputs.channel }} release $tag"
+          $files = @(
+            "dist\通洋報關平台.exe",
+            "dist\version.json",
+            "dist\SHA256.txt"
+          )
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $files --clobber
+            if ("${{ steps.vars.outputs.prerelease }}" -eq "true") {
+              gh release edit $tag --title $title --notes $notes --prerelease --latest=false
+            } else {
+              gh release edit $tag --title $title --notes $notes --latest
+            }
+          } else {
+            if ("${{ steps.vars.outputs.prerelease }}" -eq "true") {
+              gh release create $tag $files --title $title --notes $notes --prerelease --latest=false
+            } else {
+              gh release create $tag $files --title $title --notes $notes --latest
+            }
+          }

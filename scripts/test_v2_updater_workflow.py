@@ -30,12 +30,12 @@ def main() -> None:
     work_dir = Path(tempfile.gettempdir()) / "ai_customs_v2_updater_verify"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    old_exe = DIST / "release_upload.exe"
-    new_exe = DIST / "default.exe"
+    old_exe = Path("C:/Windows/System32/notepad.exe")
     if not old_exe.exists():
         old_exe = DIST / "通洋報關平台.exe"
+    new_exe = DIST / "通洋報關平台.exe"
     if not new_exe.exists():
-        raise RuntimeError("dist/default.exe is required")
+        raise RuntimeError("dist/通洋報關平台.exe is required")
 
     current = work_dir / "通洋報關平台.exe"
     update = work_dir / "AI_Customs_ERP_V2.update.exe"
