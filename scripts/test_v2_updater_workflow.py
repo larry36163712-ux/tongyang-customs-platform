@@ -26,6 +26,11 @@ def run_script(script: str, path: Path) -> int:
     return completed.returncode
 
 
+def run_script_async(script: str, path: Path) -> subprocess.Popen:
+    path.write_text(script, encoding="utf-8")
+    return subprocess.Popen(["cmd", "/c", str(path)], cwd=path.parent)
+
+
 def main() -> None:
     work_dir = Path(tempfile.gettempdir()) / "ai_customs_v2_updater_verify"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +97,7 @@ def main() -> None:
     running_expected = sha256(running_update)
     old_process = subprocess.Popen([str(running_current)])
     time.sleep(1)
-    code = run_script(
+    updater_process = run_script_async(
         build_replace_script(
             running_current,
             running_update,
@@ -105,6 +110,14 @@ def main() -> None:
         ),
         running_script,
     )
+    time.sleep(2)
+    if old_process.poll() is None:
+        old_process.terminate()
+        try:
+            old_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            old_process.kill()
+    code = updater_process.wait(timeout=90)
     if code != 0:
         raise RuntimeError(f"running replace script failed: {code}")
     if old_process.poll() is None:
@@ -163,7 +176,14 @@ def main() -> None:
     if json.loads(settings_file.read_text(encoding="utf-8-sig"))["version"] != "9.9.9":
         raise RuntimeError("settings version was not synced")
     log_text = log.read_text(encoding="utf-8", errors="ignore")
-    for marker in ("progress replace start", "progress replace completed"):
+    for marker in (
+        "old exe path=",
+        "new exe path=",
+        "old process exited",
+        "replace success current=",
+        "progress replace start",
+        "progress replace completed",
+    ):
         if marker not in log_text:
             raise RuntimeError(f"update progress log missing: {marker}")
 
@@ -200,6 +220,8 @@ def main() -> None:
         raise RuntimeError("updated exe restart was not logged")
     if "progress restart start" not in log_text:
         raise RuntimeError("restart progress was not logged")
+    if "restart success" not in log_text:
+        raise RuntimeError("restart success was not logged")
     tasklist = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {restart_current.name}"], capture_output=True, text=True)
     if restart_current.name in tasklist.stdout:
         subprocess.run(["taskkill", "/IM", restart_current.name, "/F"], check=False, capture_output=True)

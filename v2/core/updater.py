@@ -191,7 +191,8 @@ class V2Updater:
         )
         script_path.write_text(script, encoding="utf-8")
         self._log(f"replace script scheduled={script_path}")
-        subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=subprocess.CREATE_NO_WINDOW)
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+        subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=creationflags, close_fds=True)
         os._exit(0)
 
     def _log(self, message: str) -> None:
@@ -264,7 +265,7 @@ def build_replace_script(
     cleanup: bool = True,
 ) -> str:
     restart_line = (
-        'echo [%date% %time%] progress restart start >> "%LOG%"\nfor /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath $env:CURRENT -PassThru; $p.Id"`) do echo [%date% %time%] restart pid=%%p >> "%LOG%"'
+        'echo [%date% %time%] progress restart start >> "%LOG%"\nfor /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath $env:CURRENT -PassThru; $p.Id"`) do echo [%date% %time%] restart pid=%%p >> "%LOG%"\nif errorlevel 1 (echo [%date% %time%] restart failed >> "%LOG%") else (echo [%date% %time%] restart success >> "%LOG%")'
         if restart
         else 'echo [%date% %time%] restart skipped >> "%LOG%"'
     )
@@ -303,11 +304,23 @@ set "OLD_PID={old_pid}"
 if not exist "%~dp0" mkdir "%~dp0" > nul 2>&1
 if not exist "%LOG%" type nul > "%LOG%"
 echo [%date% %time%] update replace started >> "%LOG%"
+echo [%date% %time%] old exe path=%CURRENT% >> "%LOG%"
+echo [%date% %time%] new exe path=%UPDATE% >> "%LOG%"
 echo [%date% %time%] progress replace start >> "%LOG%"
 
 if not "%OLD_PID%"=="0" (
-  taskkill /PID %OLD_PID% /T /F >> "%LOG%" 2>&1
+  echo [%date% %time%] waiting for old pid=%OLD_PID% >> "%LOG%"
+  for /l %%i in (1,1,60) do (
+    tasklist /FI "PID eq %OLD_PID%" | findstr /R /C:" %OLD_PID% " > nul
+    if errorlevel 1 goto old_process_exited
+    ping 127.0.0.1 -n 2 > nul
+  )
+  echo [%date% %time%] old process still running, terminating pid=%OLD_PID% >> "%LOG%"
+  taskkill /PID %OLD_PID% /F >> "%LOG%" 2>&1
+  ping 127.0.0.1 -n 3 > nul
 )
+:old_process_exited
+echo [%date% %time%] old process exited >> "%LOG%"
 
 for /l %%i in (1,1,30) do (
   copy /y "%CURRENT%" "%BACKUP%" >> "%LOG%" 2>&1
@@ -318,6 +331,7 @@ echo [%date% %time%] backup failed >> "%LOG%"
 goto rollback
 
 :backup_done
+echo [%date% %time%] backup success path=%BACKUP% >> "%LOG%"
 copy /y "%UPDATE%" "%CURRENT%" >> "%LOG%" 2>&1
 if errorlevel 1 (
   echo [%date% %time%] replace copy failed >> "%LOG%"
@@ -336,6 +350,7 @@ if /i not "%ACTUAL_SHA%"=="%EXPECTED_SHA%" (
 )
 
 echo [%date% %time%] replace verified >> "%LOG%"
+echo [%date% %time%] replace success current=%CURRENT% >> "%LOG%"
 echo [%date% %time%] progress replace completed >> "%LOG%"
 {manifest_sync}
 {restart_line}
@@ -350,6 +365,7 @@ if exist "%BACKUP%" (
 if exist "%CURRENT%" (
   {restart_line}
 )
+echo [%date% %time%] replace fail rollback current=%CURRENT% >> "%LOG%"
 echo [%date% %time%] update rollback completed >> "%LOG%"
 exit /b 1
 """
