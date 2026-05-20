@@ -1,10 +1,10 @@
-﻿{
-    "version":  "1.0.3",
-    "update":  {
-                   "enabled":  true,
-                   "check_on_startup":  true,
-                   "channel":  "stable",
-                   "stable_manifest_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
-                   "beta_repo_api_url":  "https://api.github.com/repos/larry36163712-ux/tongyang-customs-platform/releases"
-               }
+{
+  "version": "1.0.4",
+  "update": {
+    "enabled": true,
+    "check_on_startup": true,
+    "channel": "stable",
+    "stable_manifest_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
+    "beta_repo_api_url": "https://api.github.com/repos/larry36163712-ux/tongyang-customs-platform/releases"
+  }
 }

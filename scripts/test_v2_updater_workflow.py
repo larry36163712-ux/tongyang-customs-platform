@@ -162,6 +162,10 @@ def main() -> None:
         raise RuntimeError("local manifest version was not synced")
     if json.loads(settings_file.read_text(encoding="utf-8-sig"))["version"] != "9.9.9":
         raise RuntimeError("settings version was not synced")
+    log_text = log.read_text(encoding="utf-8", errors="ignore")
+    for marker in ("progress replace start", "progress replace completed"):
+        if marker not in log_text:
+            raise RuntimeError(f"update progress log missing: {marker}")
 
     restart_current = work_dir / "restart-current.exe"
     restart_update = work_dir / "restart-update.exe"
@@ -194,6 +198,8 @@ def main() -> None:
     log_text = log.read_text(encoding="utf-8", errors="ignore")
     if "restart pid=" not in log_text:
         raise RuntimeError("updated exe restart was not logged")
+    if "progress restart start" not in log_text:
+        raise RuntimeError("restart progress was not logged")
     tasklist = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {restart_current.name}"], capture_output=True, text=True)
     if restart_current.name in tasklist.stdout:
         subprocess.run(["taskkill", "/IM", restart_current.name, "/F"], check=False, capture_output=True)

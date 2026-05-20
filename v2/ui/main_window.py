@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QApplication,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -29,12 +30,53 @@ from v2.core.backtesting import BacktestAnalyticsService
 from v2.core.checking import DeclarationDocumentChecker
 from v2.core.document_loader import DocumentLoader, LoadedDocument
 from v2.core.ds2_gateway import Ds2Gateway
-from v2.core.models import CheckStatus, ParsedDocument
+from v2.core.models import CheckStatus, DocumentType, ParsedDocument
 from v2.core.parser_engine import SemanticParserEngine
 from v2.core.print_workflow import RELEASE_METHODS, ImportPrintWorkflow
-from v2.core.settings import V2Settings, load_settings, save_settings
+from v2.core.settings import V2Settings, load_settings, logs_dir, resolve_local_version, save_settings
 from v2.core.template_learning import CustomerTemplateLearningService
 from v2.core.updater import UpdateCheck, V2Updater
+
+
+DOCUMENT_LABELS = {
+    DocumentType.DS2_DECLARATION: "DS2 報單",
+    DocumentType.INVOICE: "INV",
+    DocumentType.PACKING_LIST: "PKG",
+    DocumentType.BILL_OF_LADING: "B/L",
+    DocumentType.ARRIVAL_NOTICE: "到貨通知",
+    DocumentType.CLEARANCE_LIST: "清表",
+    DocumentType.DATA_CLEARANCE: "資料清表",
+    DocumentType.MATERIAL_CLEARANCE: "用料清表",
+    DocumentType.DRAWBACK_CLEARANCE: "核退清表",
+    DocumentType.UNKNOWN: "未知文件",
+}
+
+STATUS_LABELS = {
+    CheckStatus.MATCH: "一致",
+    CheckStatus.MISMATCH: "不一致",
+    CheckStatus.MISSING: "缺少欄位",
+    CheckStatus.HIGH_RISK: "高風險 warning",
+}
+
+FIELD_LABELS = {
+    "quantity": "數量",
+    "package_count": "件數",
+    "unit": "單位",
+    "item_no": "項次",
+    "description": "品名",
+    "gross_weight": "毛重",
+    "net_weight": "淨重",
+    "amount": "金額",
+    "currency": "幣別",
+    "hs_code": "稅則",
+    "port": "港口",
+    "container_no": "櫃號",
+    "seal_no": "封條",
+    "vessel_voyage": "船名航次",
+    "origin": "產地",
+    "customer": "客戶",
+    "supplier": "供應商",
+}
 
 
 class DocumentDropList(QListWidget):
@@ -66,11 +108,63 @@ class DocumentDropList(QListWidget):
             super().dropEvent(event)
 
 
+class ToastNotification(QFrame):
+    action_clicked = Signal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("Toast")
+        self.setFixedWidth(360)
+        self.hide()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        self.title = QLabel()
+        self.title.setObjectName("ToastTitle")
+        self.title.setWordWrap(True)
+        self.message = QLabel()
+        self.message.setObjectName("ToastMessage")
+        self.message.setWordWrap(True)
+        self.action = QPushButton("立即更新")
+        self.action.setObjectName("ToastAction")
+        self.action.clicked.connect(self.action_clicked.emit)
+
+        layout.addWidget(self.title)
+        layout.addWidget(self.message)
+        layout.addWidget(self.action, 0, Qt.AlignmentFlag.AlignRight)
+
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+
+    def show_message(self, title: str, message: str, *, action_visible: bool = False, timeout_ms: int = 6000) -> None:
+        self.title.setText(title)
+        self.message.setText(message)
+        self.action.setVisible(action_visible)
+        self.adjustSize()
+        self._reposition()
+        self.show()
+        self.raise_()
+        if timeout_ms > 0:
+            self._timer.start(timeout_ms)
+
+    def _reposition(self) -> None:
+        parent = self.parentWidget()
+        if not parent:
+            return
+        margin = 24
+        x = parent.width() - self.width() - margin
+        y = parent.height() - self.height() - margin
+        self.move(max(margin, x), max(margin, y))
+
+
 class CustomsErpWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("AI Customs ERP V2")
-        self.resize(1280, 820)
+        self.setWindowTitle("通洋報關平台")
+        self.resize(1320, 860)
 
         self.settings: V2Settings = load_settings()
         self.parser = SemanticParserEngine()
@@ -85,46 +179,77 @@ class CustomsErpWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.release_group = QButtonGroup(self)
         self.print_status = QLabel()
-        self.update_status = QLabel()
         self.loaded_documents: list[LoadedDocument] = []
+
+        self.status_dot = QLabel()
+        self.status_channel = QLabel()
+        self.status_version = QLabel()
+        self.status_update = QLabel()
+        self.toast: ToastNotification | None = None
 
         self._build_menu()
         self._build_shell()
         self._apply_theme()
+        self._set_update_status("尚未檢查更新", "neutral")
 
         if self.settings.update.check_on_startup:
             QTimer.singleShot(800, self._check_updates_on_startup)
 
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        if self.toast and self.toast.isVisible():
+            self.toast._reposition()
+
     def _build_menu(self) -> None:
-        version_action = QAction("V2 beta", self)
-        version_action.setEnabled(False)
         settings_action = QAction("設定", self)
         settings_action.triggered.connect(self._open_settings_dialog)
         check_update_action = QAction("檢查更新", self)
         check_update_action.triggered.connect(lambda: self._check_updates(interactive=True))
-        self.menuBar().addAction(version_action)
         self.menuBar().addAction(settings_action)
         self.menuBar().addAction(check_update_action)
 
     def _build_shell(self) -> None:
         root = QWidget()
-        layout = QHBoxLayout(root)
+        root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        body = QWidget()
+        layout = QHBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        sidebar = self._build_sidebar()
+        self.stack.addWidget(self._import_check_page())
+        self.stack.addWidget(self._review_page("出口核對", "出口文件 workflow 已預留，後續階段接入 DS2 與出口文件比對。"))
+        self.stack.addWidget(self._print_page())
+        self.stack.addWidget(self._analytics_page())
+
+        layout.addWidget(sidebar)
+        layout.addWidget(self.stack, 1)
+
+        root_layout.addWidget(body, 1)
+        root_layout.addWidget(self._build_global_status_bar())
+        self.setCentralWidget(root)
+
+        self.toast = ToastNotification(root)
+        self.toast.action.clicked.connect(self._apply_latest_update)
+        self.nav.setCurrentRow(0)
+
+    def _build_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(20, 24, 16, 24)
+        sidebar_layout.setContentsMargins(22, 26, 18, 22)
         sidebar_layout.setSpacing(18)
 
-        brand = QLabel("AI Customs ERP")
+        brand = QLabel("通洋報關平台")
         brand.setObjectName("Brand")
-        subtitle = QLabel("Tong Yang V2")
+        subtitle = QLabel("AI Customs ERP")
         subtitle.setObjectName("Subtitle")
         sidebar_layout.addWidget(brand)
         sidebar_layout.addWidget(subtitle)
-        sidebar_layout.addSpacing(12)
+        sidebar_layout.addSpacing(10)
 
         self.nav.setObjectName("Nav")
         for label in ("進口核對", "出口核對", "一鍵印單", "回測分析"):
@@ -135,65 +260,97 @@ class CustomsErpWindow(QMainWindow):
         sidebar_layout.addWidget(self.nav, 1)
 
         ds2_status = QLabel(self.ds2.status())
-        ds2_status.setObjectName("Muted")
+        ds2_status.setObjectName("SidebarNote")
         ds2_status.setWordWrap(True)
         sidebar_layout.addWidget(ds2_status)
+        return sidebar
 
-        self.stack.addWidget(self._import_check_page())
-        self.stack.addWidget(self._review_page("出口核對", "出口核對架構保留，第二階段尚未啟用出口規則。"))
-        self.stack.addWidget(self._print_page())
-        self.stack.addWidget(self._analytics_page())
+    def _build_global_status_bar(self) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("GlobalStatusBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(24, 10, 24, 10)
+        layout.setSpacing(8)
 
-        layout.addWidget(sidebar)
-        layout.addWidget(self.stack, 1)
-        self.setCentralWidget(root)
-        self.nav.setCurrentRow(0)
+        channel = self.settings.update.channel.title()
+        self.status_dot.setText("●")
+        self.status_dot.setObjectName("StatusDot")
+        self.status_channel.setText(channel)
+        self.status_channel.setObjectName("StatusChannel")
+        self.status_version.setText(self.settings.version)
+        self.status_version.setObjectName("StatusVersion")
+        self.status_update.setObjectName("StatusMessage")
+
+        layout.addWidget(self.status_dot)
+        layout.addWidget(self.status_channel)
+        layout.addWidget(self.status_version)
+        layout.addSpacing(14)
+        layout.addWidget(self.status_update)
+        layout.addStretch(1)
+        return bar
 
     def _import_check_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 28, 32, 28)
-        layout.setSpacing(14)
+        layout.setContentsMargins(34, 28, 34, 28)
+        layout.setSpacing(18)
 
         header = QLabel("進口核對")
         header.setObjectName("PageTitle")
         desc = QLabel("以 DS2 報單為核心，比對 INV / PKG / B/L / 到貨通知 / 清表。")
-        desc.setObjectName("Muted")
+        desc.setObjectName("PageDescription")
         layout.addWidget(header)
         layout.addWidget(desc)
 
+        upload_card = QFrame()
+        upload_card.setObjectName("Panel")
+        upload_card_layout = QVBoxLayout(upload_card)
+        upload_card_layout.setContentsMargins(18, 18, 18, 18)
+        upload_card_layout.setSpacing(14)
+
+        section_title = QLabel("文件上傳")
+        section_title.setObjectName("SectionTitle")
+        upload_card_layout.addWidget(section_title)
+
         upload_row = QHBoxLayout()
+        upload_row.setSpacing(16)
         upload_list = DocumentDropList()
-        upload_list.setMinimumHeight(170)
-        upload_list.addItem("拖曳 DS2報單 / INV / PKG / B/L / 到貨通知 / 清表 到這裡")
-        upload_list.addItem("支援 PDF、TXT、CSV、TSV；DS2 先使用 PDF 或匯出檔")
+        upload_list.setMinimumHeight(190)
+        self._set_upload_placeholder(upload_list)
+
         upload_actions = QVBoxLayout()
-        choose_button = QPushButton("選擇文件")
-        clear_button = QPushButton("清空列表")
-        upload_hint = QLabel("尚未載入文件")
-        upload_hint.setObjectName("Muted")
+        upload_actions.setSpacing(10)
+        choose_button = QPushButton("選擇檔案")
+        clear_button = QPushButton("清除文件")
+        clear_button.setObjectName("SecondaryButton")
+        upload_hint = QLabel("支援 PDF / TXT / CSV / TSV")
+        upload_hint.setObjectName("Hint")
         upload_actions.addWidget(choose_button)
         upload_actions.addWidget(clear_button)
         upload_actions.addWidget(upload_hint)
         upload_actions.addStretch(1)
         upload_row.addWidget(upload_list, 1)
         upload_row.addLayout(upload_actions)
-        layout.addLayout(upload_row)
+        upload_card_layout.addLayout(upload_row)
+        layout.addWidget(upload_card)
 
         action_row = QHBoxLayout()
-        run_button = QPushButton("執行核對")
-        summary = QLabel("尚未核對")
+        run_button = QPushButton("開始核對")
+        summary = QLabel("等待文件")
         summary.setObjectName("StatusNeutral")
         action_row.addWidget(run_button)
         action_row.addWidget(summary, 1)
         layout.addLayout(action_row)
 
         result_row = QHBoxLayout()
+        result_row.setSpacing(16)
         diff_list = QTextEdit()
         diff_list.setReadOnly(True)
-        diff_list.setPlaceholderText("差異列表")
+        diff_list.setObjectName("ResultBox")
+        diff_list.setPlaceholderText("核對結果會顯示在這裡")
         parser_debug = QTextEdit()
         parser_debug.setReadOnly(True)
+        parser_debug.setObjectName("DebugBox")
         parser_debug.setPlaceholderText("Parser debug")
         result_row.addWidget(diff_list)
         result_row.addWidget(parser_debug)
@@ -208,12 +365,12 @@ class CustomsErpWindow(QMainWindow):
     def _review_page(self, title: str, description: str) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setContentsMargins(34, 28, 34, 28)
         layout.setSpacing(18)
         header = QLabel(title)
         header.setObjectName("PageTitle")
         desc = QLabel(description)
-        desc.setObjectName("Muted")
+        desc.setObjectName("PageDescription")
         layout.addWidget(header)
         layout.addWidget(desc)
         layout.addStretch(1)
@@ -222,17 +379,18 @@ class CustomsErpWindow(QMainWindow):
     def _print_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setContentsMargins(34, 28, 34, 28)
         layout.setSpacing(18)
 
         title = QLabel("一鍵印單")
         title.setObjectName("PageTitle")
-        note = QLabel("目前只建立進口 workflow UI，不控制印表機。")
-        note.setObjectName("Muted")
+        note = QLabel("目前建立進口印單 workflow，不控制印表機；請手動選擇 C1 / C2 / C3M / C3X。")
+        note.setObjectName("PageDescription")
         layout.addWidget(title)
         layout.addWidget(note)
 
         method_row = QHBoxLayout()
+        method_row.setSpacing(12)
         for index, method in enumerate(RELEASE_METHODS):
             radio = QRadioButton(method)
             self.release_group.addButton(radio)
@@ -248,11 +406,11 @@ class CustomsErpWindow(QMainWindow):
         steps.setText("\n".join(f"{i + 1}. {step}" for i, step in enumerate(workflow.preview_steps())))
         layout.addWidget(steps)
 
-        preview = QPushButton("建立待印流程")
+        preview = QPushButton("產生流程預覽")
         preview.clicked.connect(lambda: self._preview_print_workflow(steps))
         layout.addWidget(preview, 0, Qt.AlignmentFlag.AlignLeft)
 
-        self.print_status.setObjectName("Muted")
+        self.print_status.setObjectName("Hint")
         layout.addWidget(self.print_status)
         layout.addStretch(1)
         return page
@@ -260,27 +418,28 @@ class CustomsErpWindow(QMainWindow):
     def _analytics_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setContentsMargins(34, 28, 34, 28)
         layout.setSpacing(18)
 
-        title = QLabel("回測分析中心")
+        title = QLabel("回測分析")
         title.setObjectName("PageTitle")
         layout.addWidget(title)
 
         grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(14)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(16)
         for index, metric in enumerate(self.analytics.summary_metrics()):
             card = QFrame()
             card.setObjectName("MetricCard")
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(18, 16, 18, 16)
+            card_layout.setSpacing(8)
             label = QLabel(metric.label)
-            label.setObjectName("Muted")
+            label.setObjectName("Hint")
             value = QLabel(metric.value)
             value.setObjectName("MetricValue")
             trend = QLabel(metric.trend)
-            trend.setObjectName("Muted")
+            trend.setObjectName("Hint")
             card_layout.addWidget(label)
             card_layout.addWidget(value)
             card_layout.addWidget(trend)
@@ -291,7 +450,7 @@ class CustomsErpWindow(QMainWindow):
         profiles.setReadOnly(True)
         profiles.setText(
             "\n".join(
-                f"{p.customer} / {p.supplier} / {p.document_type.value} / samples={p.sample_count} / failures={p.failure_count}"
+                f"{p.customer} / {p.supplier} / {self._document_label(p.document_type)} / samples={p.sample_count} / failures={p.failure_count}"
                 for p in self.templates.profiles()
             )
         )
@@ -305,24 +464,24 @@ class CustomsErpWindow(QMainWindow):
         parser_debug: QTextEdit,
     ) -> None:
         report = self.checker.check_documents([item.parsed for item in self.loaded_documents])
-        summary.setText(f"{report.status.value} - {report.summary}")
+        status_text = self._status_label(report.status)
+        summary.setText(f"{status_text} - {report.summary}")
         summary.setObjectName("StatusOk" if report.status == CheckStatus.MATCH else "StatusFail")
         summary.style().unpolish(summary)
         summary.style().polish(summary)
 
-        diff_lines = ["核對結果:"]
+        diff_lines = ["核對結果"]
         if report.high_risk_warnings:
             diff_lines.append("")
-            diff_lines.append("高風險 warning:")
+            diff_lines.append("高風險 warning")
             diff_lines.extend(f"- {warning}" for warning in report.high_risk_warnings)
             diff_lines.append("")
         for result in report.results:
             values = " | ".join(f"{name}={value}" for name, value in result.document_values.items()) or "-"
             diff_lines.append(
-                f"- {result.status.value} | {result.message} | DS2={result.declaration_value or '-'} | 文件={values}"
+                f"- {self._status_label(result.status)} | {result.message} | DS2={result.declaration_value or '-'} | 文件={values}"
             )
         diff_list.setText("\n".join(diff_lines))
-
         parser_debug.setText(self._format_debug_documents([item.parsed for item in self.loaded_documents]))
 
     def _choose_documents(self, upload_list: DocumentDropList, upload_hint: QLabel, parser_debug: QTextEdit) -> None:
@@ -358,12 +517,11 @@ class CustomsErpWindow(QMainWindow):
     ) -> None:
         self.loaded_documents.clear()
         upload_list.clear()
-        upload_list.addItem("拖曳 DS2報單 / INV / PKG / B/L / 到貨通知 / 清表 到這裡")
-        upload_list.addItem("支援 PDF、TXT、CSV、TSV；DS2 先使用 PDF 或匯出檔")
-        upload_hint.setText("尚未載入文件")
+        self._set_upload_placeholder(upload_list)
+        upload_hint.setText("支援 PDF / TXT / CSV / TSV")
         diff_list.clear()
         parser_debug.clear()
-        summary.setText("尚未核對")
+        summary.setText("等待文件")
         summary.setObjectName("StatusNeutral")
         summary.style().unpolish(summary)
         summary.style().polish(summary)
@@ -371,8 +529,14 @@ class CustomsErpWindow(QMainWindow):
     def _refresh_upload_list(self, upload_list: DocumentDropList, upload_hint: QLabel) -> None:
         upload_list.clear()
         for item in self.loaded_documents:
-            upload_list.addItem(f"{item.parsed.document_type.value} | {item.path.name} | fields={len(item.parsed.fields)}")
+            upload_list.addItem(
+                f"{self._document_label(item.parsed.document_type)} | {item.path.name} | fields={len(item.parsed.fields)}"
+            )
         upload_hint.setText(f"已載入 {len(self.loaded_documents)} 份文件")
+
+    def _set_upload_placeholder(self, upload_list: QListWidget) -> None:
+        upload_list.addItem("拖曳 DS2 報單 / INV / PKG / B/L / 到貨通知 / 清表到這裡")
+        upload_list.addItem("或使用右側按鈕選擇檔案")
 
     def _format_debug_documents(self, documents: list[ParsedDocument]) -> str:
         if not documents:
@@ -382,12 +546,13 @@ class CustomsErpWindow(QMainWindow):
     def _format_parsed_document(self, document: ParsedDocument) -> str:
         lines = [
             f"source={document.source_name or '-'}",
-            f"type={document.document_type.value}",
+            f"type={self._document_label(document.document_type)}",
             f"template={document.template_id}",
         ]
         for field in document.fields:
+            label = FIELD_LABELS.get(field.canonical.value, field.canonical.value)
             lines.append(
-                f"- {field.canonical.value}: {field.value} | label={field.source_label} | confidence={field.confidence} | evidence={field.evidence}"
+                f"- {label}: {field.value} | label={field.source_label} | confidence={field.confidence} | evidence={field.evidence}"
             )
         if document.warnings:
             lines.extend(f"warning: {warning}" for warning in document.warnings)
@@ -404,39 +569,81 @@ class CustomsErpWindow(QMainWindow):
     def _check_updates_on_startup(self) -> None:
         result = self._check_updates(interactive=False)
         if result and result.should_show_popup:
-            self._prompt_update(result)
+            self._show_update_toast(result)
 
     def _check_updates(self, interactive: bool) -> UpdateCheck | None:
         updater = V2Updater(self.settings.version, self.settings.update)
         result = updater.check()
         self.latest_update = result
-        if interactive:
-            if result.should_show_popup:
-                self._prompt_update(result)
-            else:
-                QMessageBox.information(self, "更新", result.message)
+        self._sync_update_status(result)
+        if result.should_show_popup:
+            self._show_update_toast(result)
+        elif interactive:
+            self._show_toast("更新狀態", result.message, action_visible=False, timeout_ms=4200)
         return result
 
-    def _prompt_update(self, result: UpdateCheck) -> None:
+    def _show_update_toast(self, result: UpdateCheck) -> None:
         if not result.manifest:
             return
-        reply = QMessageBox.question(
-            self,
-            "發現新版",
-            f"{result.message}\n\n是否下載並更新？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        self._show_toast("新版本可用", result.manifest.version, action_visible=True, timeout_ms=0)
+
+    def _show_toast(self, title: str, message: str, *, action_visible: bool, timeout_ms: int) -> None:
+        if self.toast:
+            self.toast.show_message(title, message, action_visible=action_visible, timeout_ms=timeout_ms)
+
+    def _apply_latest_update(self) -> None:
+        if not self.latest_update or not self.latest_update.manifest:
+            self._show_toast("更新狀態", "目前沒有可套用的新版資訊，請重新檢查更新。", action_visible=False, timeout_ms=5000)
             return
-        apply_result = V2Updater(self.settings.version, self.settings.update).apply(result.manifest)
-        QMessageBox.information(self, "更新", apply_result.message)
+        self._write_update_progress("ui update button clicked")
+        self._set_update_status("正在下載新版...", "available")
+        self._show_toast("正在更新", "下載新版並驗證 SHA256，完成後會自動重新啟動。", action_visible=False, timeout_ms=0)
+        if self.toast:
+            self.toast.repaint()
+        self.repaint()
+        QApplication.processEvents()
+        apply_result = V2Updater(self.settings.version, self.settings.update).apply(self.latest_update.manifest)
+        self.settings.version = resolve_local_version(self.settings.version)
+        self._set_update_status(apply_result.message, "available")
+        self._show_toast("更新程序已啟動", apply_result.message, action_visible=False, timeout_ms=5000)
+
+    def _sync_update_status(self, result: UpdateCheck) -> None:
+        if result.should_show_popup:
+            remote = result.manifest.version if result.manifest else ""
+            self._set_update_status(f"發現新版本 {remote}", "available")
+        elif result.status == "current":
+            self._set_update_status("已是最新版本", "current")
+        elif result.status == "disabled":
+            self._set_update_status("自動更新已停用", "neutral")
+        else:
+            self._set_update_status(result.message, "neutral")
+
+    def _set_update_status(self, text: str, state: str) -> None:
+        self.settings.version = resolve_local_version(self.settings.version)
+        self.status_channel.setText(self.settings.update.channel.title())
+        self.status_version.setText(self.settings.version)
+        self.status_update.setText(text)
+        self.status_dot.setProperty("state", state)
+        self.status_update.setProperty("state", state)
+        for widget in (self.status_dot, self.status_update):
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+
+    def _write_update_progress(self, message: str) -> None:
+        path = logs_dir() / "update-debug.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[UI] {message}\n")
 
     def _open_settings_dialog(self) -> None:
         dialog = QDialog(self)
         dialog.setWindowTitle("設定")
+        dialog.setObjectName("SettingsDialog")
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(22, 22, 22, 22)
+        layout.setSpacing(14)
 
-        enabled = QCheckBox("自動更新")
+        enabled = QCheckBox("啟用自動更新")
         enabled.setChecked(self.settings.update.enabled)
         startup = QCheckBox("啟動時檢查更新")
         startup.setChecked(self.settings.update.check_on_startup)
@@ -460,51 +667,83 @@ class CustomsErpWindow(QMainWindow):
         self.settings.update.check_on_startup = startup.isChecked()
         self.settings.update.channel = channel.currentText()
         save_settings(self.settings)
+        self._set_update_status("設定已儲存", "neutral")
         QMessageBox.information(self, "設定", "設定已儲存。")
+
+    def _document_label(self, document_type: DocumentType) -> str:
+        return DOCUMENT_LABELS.get(document_type, document_type.value)
+
+    def _status_label(self, status: CheckStatus) -> str:
+        return STATUS_LABELS.get(status, status.value)
 
     def _apply_theme(self) -> None:
         self.setStyleSheet(
             """
             QMainWindow, QWidget {
-                background: #111418;
-                color: #E8EDF2;
+                background: #0F1318;
+                color: #E7EDF3;
                 font-family: "Microsoft JhengHei UI", "Segoe UI";
                 font-size: 14px;
             }
             QMenuBar {
-                background: #111418;
-                color: #9DAAB8;
-                border-bottom: 1px solid #252B33;
+                background: #0F1318;
+                color: #A8B4C2;
+                border-bottom: 1px solid #202832;
+                padding: 4px 10px;
+            }
+            QMenuBar::item {
+                padding: 7px 12px;
+                border-radius: 6px;
+            }
+            QMenuBar::item:selected {
+                background: #1B2530;
+                color: #FFFFFF;
             }
             #Sidebar {
-                min-width: 260px;
-                max-width: 260px;
-                background: #171B21;
-                border-right: 1px solid #252B33;
+                min-width: 268px;
+                max-width: 268px;
+                background: #121820;
+                border-right: 1px solid #25303B;
             }
             #Brand {
                 font-size: 22px;
                 font-weight: 700;
-                color: #F4F7FA;
+                color: #F7FAFC;
             }
-            #Subtitle, #Muted {
-                color: #9DAAB8;
+            #Subtitle {
+                color: #8290A2;
+                font-size: 12px;
+                letter-spacing: 0;
+            }
+            #SidebarNote {
+                color: #8290A2;
+                background: #17202A;
+                border: 1px solid #283442;
+                border-radius: 6px;
+                padding: 12px;
             }
             #PageTitle {
-                font-size: 28px;
+                font-size: 27px;
                 font-weight: 700;
-                color: #F4F7FA;
+                color: #F7FAFC;
             }
-            #StatusOk {
-                color: #7DD3A8;
+            #PageDescription, #Hint {
+                color: #99A7B7;
+            }
+            #SectionTitle {
+                color: #DCE5EE;
+                font-size: 15px;
                 font-weight: 700;
             }
-            #StatusFail {
-                color: #F38B8B;
-                font-weight: 700;
+            #Panel, #MetricCard {
+                background: #151B23;
+                border: 1px solid #293543;
+                border-radius: 8px;
             }
-            #StatusNeutral {
-                color: #9DAAB8;
+            #MetricValue {
+                font-size: 24px;
+                font-weight: 700;
+                color: #F7FAFC;
             }
             #Nav {
                 background: transparent;
@@ -512,52 +751,133 @@ class CustomsErpWindow(QMainWindow):
                 outline: 0;
             }
             #Nav::item {
-                min-height: 44px;
+                min-height: 42px;
                 padding: 8px 12px;
-                border-radius: 6px;
-                color: #C8D1DA;
+                border-radius: 7px;
+                color: #B8C4D2;
+            }
+            #Nav::item:hover {
+                background: #1B2530;
+                color: #F7FAFC;
             }
             #Nav::item:selected {
-                background: #235D74;
+                background: #1E5F74;
                 color: #FFFFFF;
+            }
+            QListWidget#UploadList {
+                background: #10161D;
+                border: 1px dashed #3A4858;
+                border-radius: 8px;
+                padding: 10px;
+                color: #C8D3DF;
+            }
+            QListWidget#UploadList::item {
+                min-height: 30px;
+                padding: 6px 8px;
+                border-radius: 5px;
+            }
+            QListWidget#UploadList::item:hover {
+                background: #1B2530;
             }
             QTextEdit {
-                background: #1A1F26;
-                border: 1px solid #2E3642;
-                border-radius: 6px;
-                color: #E8EDF2;
-                padding: 10px;
+                background: #10161D;
+                border: 1px solid #293543;
+                border-radius: 8px;
+                color: #E7EDF3;
+                padding: 12px;
+                selection-background-color: #256D83;
             }
             QPushButton {
-                background: #2F7D95;
+                background: #26758C;
                 color: #FFFFFF;
                 border: 0;
-                border-radius: 6px;
+                border-radius: 7px;
                 padding: 9px 16px;
-                font-weight: 600;
+                font-weight: 700;
             }
             QPushButton:hover {
-                background: #3890AB;
+                background: #2F8EA8;
             }
-            QRadioButton, QCheckBox, QComboBox {
-                color: #D9E1EA;
+            QPushButton:pressed {
+                background: #1F6073;
+            }
+            QPushButton#SecondaryButton {
+                background: #1B2530;
+                color: #D7E0EA;
+                border: 1px solid #314052;
+            }
+            QPushButton#SecondaryButton:hover {
+                background: #243141;
+            }
+            QRadioButton, QCheckBox {
+                color: #D7E0EA;
                 spacing: 8px;
-                padding: 8px 10px;
+                padding: 8px 6px;
             }
             QComboBox {
-                background: #1A1F26;
-                border: 1px solid #2E3642;
-                border-radius: 6px;
+                color: #D7E0EA;
+                background: #10161D;
+                border: 1px solid #314052;
+                border-radius: 7px;
+                padding: 8px 10px;
             }
-            #MetricCard {
-                background: #1A1F26;
-                border: 1px solid #2E3642;
-                border-radius: 6px;
-            }
-            #MetricValue {
-                font-size: 24px;
+            #StatusOk {
+                color: #74D79A;
                 font-weight: 700;
-                color: #F4F7FA;
+            }
+            #StatusFail {
+                color: #FF8B8B;
+                font-weight: 700;
+            }
+            #StatusNeutral {
+                color: #9AA8B8;
+                font-weight: 700;
+            }
+            #GlobalStatusBar {
+                background: #10161D;
+                border-top: 1px solid #26313D;
+            }
+            #StatusDot {
+                font-size: 16px;
+                color: #91A0B2;
+            }
+            #StatusDot[state="current"] {
+                color: #74D79A;
+            }
+            #StatusDot[state="available"] {
+                color: #F3C969;
+            }
+            #StatusChannel, #StatusVersion {
+                color: #F3F6FA;
+                font-weight: 700;
+            }
+            #StatusMessage {
+                color: #9AA8B8;
+            }
+            #StatusMessage[state="current"] {
+                color: #74D79A;
+            }
+            #StatusMessage[state="available"] {
+                color: #F3C969;
+            }
+            #Toast {
+                background: #17202A;
+                border: 1px solid #3A4858;
+                border-radius: 8px;
+            }
+            #ToastTitle {
+                color: #F7FAFC;
+                font-weight: 700;
+                font-size: 15px;
+            }
+            #ToastMessage {
+                color: #C8D3DF;
+            }
+            #ToastAction {
+                padding: 8px 14px;
+            }
+            QDialog {
+                background: #121820;
             }
             """
         )

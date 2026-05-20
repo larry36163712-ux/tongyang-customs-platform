@@ -83,8 +83,12 @@ class V2Updater:
 
     def apply(self, manifest: UpdateManifest) -> UpdateCheck:
         try:
+            self._log(f"progress download start version={manifest.version} url={manifest.download_url}")
             downloaded = self._download(manifest)
+            self._log(f"progress download completed path={downloaded}")
+            self._log(f"progress verify completed sha256={manifest.sha256}")
             staged_manifest = self._stage_manifest(manifest)
+            self._log("progress replace scheduled")
             self._schedule_replace(downloaded, staged_manifest)
         except Exception as exc:
             self._log(f"apply failed: {exc}")
@@ -133,16 +137,17 @@ class V2Updater:
 
         target = Path(tempfile.gettempdir()) / "AI_Customs_ERP_V2.update.exe"
         target.unlink(missing_ok=True)
-        self._log(f"downloading {manifest.download_url} -> {target}")
+        self._log(f"download start {manifest.download_url} -> {target}")
 
         with _open_url(manifest.download_url, timeout=120) as response:
             target.write_bytes(response.read())
 
         digest = hashlib.sha256(target.read_bytes()).hexdigest().lower()
-        self._log(f"download sha256={digest}")
+        self._log(f"verify sha256 actual={digest} expected={manifest.sha256}")
         if digest != manifest.sha256:
             target.unlink(missing_ok=True)
             raise RuntimeError("新版 EXE SHA256 驗證失敗")
+        self._log("verify ok")
         return target
 
     def _schedule_replace(self, update_exe: Path, staged_manifest: Path) -> None:
@@ -166,7 +171,7 @@ class V2Updater:
             cleanup=True,
         )
         script_path.write_text(script, encoding="utf-8")
-        self._log(f"scheduled replace script={script_path}")
+        self._log(f"replace script scheduled={script_path}")
         subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=subprocess.CREATE_NO_WINDOW)
         os._exit(0)
 
@@ -235,7 +240,7 @@ def build_replace_script(
     cleanup: bool = True,
 ) -> str:
     restart_line = (
-        'for /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath $env:CURRENT -PassThru; $p.Id"`) do echo [%date% %time%] restart pid=%%p >> "%LOG%"'
+        'echo [%date% %time%] progress restart start >> "%LOG%"\nfor /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath $env:CURRENT -PassThru; $p.Id"`) do echo [%date% %time%] restart pid=%%p >> "%LOG%"'
         if restart
         else 'echo [%date% %time%] restart skipped >> "%LOG%"'
     )
@@ -274,6 +279,7 @@ set "OLD_PID={old_pid}"
 if not exist "%~dp0" mkdir "%~dp0" > nul 2>&1
 if not exist "%LOG%" type nul > "%LOG%"
 echo [%date% %time%] update replace started >> "%LOG%"
+echo [%date% %time%] progress replace start >> "%LOG%"
 
 if not "%OLD_PID%"=="0" (
   taskkill /PID %OLD_PID% /T /F >> "%LOG%" 2>&1
@@ -306,6 +312,7 @@ if /i not "%ACTUAL_SHA%"=="%EXPECTED_SHA%" (
 )
 
 echo [%date% %time%] replace verified >> "%LOG%"
+echo [%date% %time%] progress replace completed >> "%LOG%"
 {manifest_sync}
 {restart_line}
 {cleanup_lines}

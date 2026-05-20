@@ -1,8 +1,8 @@
-﻿{
-    "app_name":  "éæ´å ±éå¹³å°",
-    "version":  "1.0.3",
-    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe",
-    "sha256":  "87c4262c796f39e7fec170b5a0b142c7696c455c67b0895880b16c3b7e503491",
-    "channel":  "stable",
-    "notes":  "Stable release v1.0.3"
+{
+  "app_name": "通洋報關平台",
+  "version": "1.0.4",
+  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.0.4/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe",
+  "sha256": "2d3149dd6bf9b0cd3fbcf2093c71311194c8d1bf27ab752ba615a92fb17a9237",
+  "channel": "stable",
+  "notes": "Stable release v1.0.4"
 }
