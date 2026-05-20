@@ -34,7 +34,7 @@ from v2.core.ds2_gateway import Ds2Gateway
 from v2.core.models import CheckStatus, DocumentType, ParsedDocument
 from v2.core.parser_engine import SemanticParserEngine
 from v2.core.print_workflow import RELEASE_METHODS, ImportPrintWorkflow
-from v2.core.settings import V2Settings, load_settings, logs_dir, resolve_local_version, save_settings
+from v2.core.settings import V2Settings, load_settings, logs_dir, resolve_local_version, save_settings, version_debug_log
 from v2.core.template_learning import CustomerTemplateLearningService
 from v2.core.updater import UpdateCheck, V2Updater
 
@@ -614,6 +614,7 @@ class CustomsErpWindow(QMainWindow):
             self._show_update_toast(result)
 
     def _check_updates(self, interactive: bool) -> UpdateCheck | None:
+        self.settings.version = resolve_local_version()
         updater = V2Updater(self.settings.version, self.settings.update)
         result = updater.check()
         self.latest_update = result
@@ -646,6 +647,7 @@ class CustomsErpWindow(QMainWindow):
             self.toast.set_progress("正在更新", "downloading", 0)
 
         self.update_thread = QThread(self)
+        self.settings.version = resolve_local_version()
         self.update_worker = UpdateApplyWorker(self.settings.version, self.settings.update, self.latest_update.manifest)
         self.update_worker.moveToThread(self.update_thread)
         self.update_thread.started.connect(self.update_worker.run)
@@ -672,7 +674,7 @@ class CustomsErpWindow(QMainWindow):
 
     @Slot(object)
     def _on_update_finished(self, apply_result: UpdateCheck) -> None:
-        self.settings.version = resolve_local_version(self.settings.version)
+        self.settings.version = resolve_local_version()
         state = "available" if apply_result.status != "error" else "neutral"
         self._set_update_status(apply_result.message, state)
         self._show_toast("更新狀態", apply_result.message, action_visible=False, timeout_ms=5000)
@@ -694,10 +696,14 @@ class CustomsErpWindow(QMainWindow):
             self._set_update_status(result.message, "neutral")
 
     def _set_update_status(self, text: str, state: str) -> None:
-        self.settings.version = resolve_local_version(self.settings.version)
+        self.settings.version = resolve_local_version()
         self.status_channel.setText(self.settings.update.channel.title())
         self.status_version.setText(self.settings.version)
         self.status_update.setText(text)
+        version_debug_log(
+            f"ui_display_version={self.settings.version} ui_channel={self.settings.update.channel} "
+            f"ui_update_status={text} ui_state={state}"
+        )
         self.status_dot.setProperty("state", state)
         self.status_update.setProperty("state", state)
         for widget in (self.status_dot, self.status_update):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 
@@ -19,7 +20,7 @@ class UpdateSettings:
 
 @dataclass
 class V2Settings:
-    version: str = "1.0.0"
+    version: str = ""
     update: UpdateSettings = field(default_factory=UpdateSettings)
 
 
@@ -47,6 +48,32 @@ def logs_dir() -> Path:
     return path
 
 
+def version_debug_log(message: str) -> None:
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    path = logs_dir() / "version_debug.log"
+    exe_path = Path(sys.executable).resolve()
+    manifest_path = local_manifest_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"[{stamp}] exe_path={exe_path} version_json_path={manifest_path} {message}\n")
+
+
+def read_local_manifest() -> dict:
+    path = local_manifest_path()
+    if not path.exists():
+        version_debug_log("local manifest missing")
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        version_debug_log(f"local manifest read failed error={exc}")
+        return {}
+    if not isinstance(data, dict):
+        version_debug_log("local manifest invalid type")
+        return {}
+    return data
+
+
 def load_settings() -> V2Settings:
     path = settings_path()
     if not path.exists():
@@ -54,6 +81,7 @@ def load_settings() -> V2Settings:
         if not getattr(sys, "frozen", False):
             settings.update.channel = "dev"
         save_settings(settings)
+        version_debug_log(f"load_settings created settings local_version={settings.version} channel={settings.update.channel}")
         return settings
 
     data = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -64,8 +92,10 @@ def load_settings() -> V2Settings:
     if not getattr(sys, "frozen", False):
         channel = "dev"
 
+    local_version = resolve_local_version()
+    version_debug_log(f"load_settings local_version={local_version} channel={channel}")
     return V2Settings(
-        version=resolve_local_version(),
+        version=local_version,
         update=UpdateSettings(
             enabled=bool(update_data.get("enabled", True)),
             check_on_startup=bool(update_data.get("check_on_startup", True)),
@@ -83,20 +113,14 @@ def load_settings() -> V2Settings:
 
 def save_settings(settings: V2Settings) -> None:
     path = settings_path()
-    settings.version = resolve_local_version(settings.version)
+    settings.version = resolve_local_version()
     if settings.update.channel not in {"dev", "stable"}:
         settings.update.channel = "stable"
     path.write_text(json.dumps(asdict(settings), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def resolve_local_version(default: str = "1.0.0") -> str:
-    path = local_manifest_path()
-    if not path.exists():
-        return default
-    try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
-        return default
+def resolve_local_version(default: str = "") -> str:
+    data = read_local_manifest()
     version = str(data.get("version", "")).strip()
     if version:
         return version

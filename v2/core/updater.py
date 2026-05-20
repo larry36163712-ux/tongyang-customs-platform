@@ -14,7 +14,14 @@ from typing import Callable
 
 import requests
 
-from v2.core.settings import UpdateSettings, local_manifest_path, logs_dir, resolve_local_version, settings_path
+from v2.core.settings import (
+    UpdateSettings,
+    local_manifest_path,
+    logs_dir,
+    resolve_local_version,
+    settings_path,
+    version_debug_log,
+)
 
 ProgressCallback = Callable[[str, int, str], None]
 
@@ -51,7 +58,7 @@ class V2Updater:
     def __init__(self, current_version: str, settings: UpdateSettings) -> None:
         self.settings = settings
         self.local_version_path = local_manifest_path()
-        self.current_version = resolve_local_version(current_version)
+        self.current_version = resolve_local_version()
         self.log_path = logs_dir() / "update-debug.log"
 
     def check(self) -> UpdateCheck:
@@ -86,6 +93,10 @@ class V2Updater:
         compare = _compare_versions(self.current_version, manifest.version)
         should_show_popup = compare < 0
         self._log(f"compare result={compare} should_show_popup={should_show_popup}")
+        version_debug_log(
+            f"local_version={self.current_version} remote_version={manifest.version} "
+            f"channel={self.settings.channel} compare_result={compare} should_show_popup={should_show_popup}"
+        )
         if compare >= 0:
             self._log("update result=current should_show_popup=False")
             return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest, compare, False)
@@ -218,7 +229,7 @@ def _read_json_url(url: str) -> dict | list:
         },
     )
     response.raise_for_status()
-    return response.json()
+    return json.loads(response.content.decode("utf-8-sig"))
 
 
 def _version_key(value: str) -> tuple[int, ...]:

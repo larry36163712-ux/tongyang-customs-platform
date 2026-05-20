@@ -173,6 +173,9 @@ def main() -> None:
         raise RuntimeError(f"manifest sync script failed: {code}")
     if json.loads(local_manifest.read_text(encoding="utf-8"))["version"] != "9.9.9":
         raise RuntimeError("local manifest version was not synced")
+    synced_manifest = json.loads(local_manifest.read_text(encoding="utf-8-sig"))
+    if synced_manifest.get("channel") != "stable":
+        raise RuntimeError("local manifest channel was not synced")
     if json.loads(settings_file.read_text(encoding="utf-8-sig"))["version"] != "9.9.9":
         raise RuntimeError("settings version was not synced")
     log_text = log.read_text(encoding="utf-8", errors="ignore")
