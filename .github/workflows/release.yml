@@ -97,20 +97,25 @@ jobs:
           .\build_v2_exe.ps1
 
       - name: Generate version.json
-        run: >
-          python scripts/make_release_manifest.py
-          --repo "${{ github.repository }}"
-          --tag "${{ steps.vars.outputs.tag }}"
-          --version "${{ steps.vars.outputs.version }}"
-          --exe "dist/通洋報關平台.exe"
-          --channel "${{ steps.vars.outputs.channel }}"
-          --output "dist/version.json"
+        shell: pwsh
+        run: |
+          $exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+          $exePath = Join-Path "dist" $exeName
+          python scripts/make_release_manifest.py `
+            --repo "${{ github.repository }}" `
+            --tag "${{ steps.vars.outputs.tag }}" `
+            --version "${{ steps.vars.outputs.version }}" `
+            --exe $exePath `
+            --channel "${{ steps.vars.outputs.channel }}" `
+            --output "dist/version.json"
 
       - name: Generate SHA256
         shell: pwsh
         run: |
-          $hash = (Get-FileHash -Algorithm SHA256 "dist\通洋報關平台.exe").Hash.ToLower()
-          Set-Content -Path "dist\SHA256.txt" -Value "$hash  通洋報關平台.exe" -Encoding UTF8
+          $exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+          $exePath = Join-Path "dist" $exeName
+          $hash = (Get-FileHash -Algorithm SHA256 $exePath).Hash.ToLower()
+          Set-Content -Path "dist\SHA256.txt" -Value "$hash  $exeName" -Encoding UTF8
 
       - name: Create or update GitHub Release
         shell: pwsh
@@ -120,8 +125,9 @@ jobs:
           $tag = "${{ steps.vars.outputs.tag }}"
           $title = "AI Customs ERP V2 ${{ steps.vars.outputs.version }}"
           $notes = "${{ steps.vars.outputs.channel }} release $tag"
+          $exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
           $files = @(
-            "dist\通洋報關平台.exe",
+            (Join-Path "dist" $exeName),
             "dist\version.json",
             "dist\SHA256.txt"
           )
