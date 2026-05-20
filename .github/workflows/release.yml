@@ -1,4 +1,4 @@
-name: Build and publish AI Customs ERP V2
+name: Build AI Customs ERP V2
 
 on:
   push:
@@ -7,23 +7,22 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version number, for example 1.0.1"
-        required: false
+        description: "Stable version number, for example 1.0.6"
+        required: true
         type: string
       channel:
         description: "Release channel"
         required: true
-        default: "beta"
+        default: "stable"
         type: choice
         options:
-          - beta
           - stable
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
 
     steps:
@@ -35,34 +34,22 @@ jobs:
         shell: pwsh
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $inputVersion = "${{ inputs.version }}"
+            $version = "${{ inputs.version }}"
             $channel = "${{ inputs.channel }}"
-          } else {
-            $inputVersion = ""
-            $channel = "stable"
-          }
-
-          $settings = Get-Content settings.json -Raw | ConvertFrom-Json
-          $baseVersion = if ($inputVersion) { $inputVersion } else { $settings.version }
-
-          if ($channel -eq "beta") {
-            $version = "$baseVersion-beta.${{ github.run_number }}"
+            $publish = "true"
             $tag = "v$version"
-            $prerelease = "true"
-            $makeLatest = "false"
           } else {
-            $version = "$baseVersion.${{ github.run_number }}"
-            if ($inputVersion) { $version = $inputVersion }
-            $tag = "v$version"
-            $prerelease = "false"
-            $makeLatest = "true"
+            $settings = Get-Content settings.json -Raw | ConvertFrom-Json
+            $version = "$($settings.version)-dev.${{ github.run_number }}"
+            $channel = "dev"
+            $publish = "false"
+            $tag = "dev-$version"
           }
 
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "channel=$channel" >> $env:GITHUB_OUTPUT
-          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
-          "make_latest=$makeLatest" >> $env:GITHUB_OUTPUT
+          "publish=$publish" >> $env:GITHUB_OUTPUT
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -76,74 +63,81 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.vars.outputs.version }}"
-          $settings = Get-Content settings.json -Raw | ConvertFrom-Json
-          $settings.version = $version
-          $settings | ConvertTo-Json -Depth 20 | Set-Content settings.json -Encoding UTF8
-          $manifest = Get-Content version.json -Raw | ConvertFrom-Json
-          $manifest.version = $version
-          $manifest | ConvertTo-Json -Depth 20 | Set-Content version.json -Encoding UTF8
-
-      - name: Create or update tag
-        shell: pwsh
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "${{ steps.vars.outputs.tag }}" "${{ github.sha }}"
-          git push origin -f "${{ steps.vars.outputs.tag }}"
+          $channel = "${{ steps.vars.outputs.channel }}"
+          foreach ($path in @("settings.json", "config\settings.json")) {
+            if (Test-Path $path) {
+              $settings = Get-Content $path -Raw | ConvertFrom-Json
+              $settings.version = $version
+              $settings | ConvertTo-Json -Depth 20 | Set-Content $path -Encoding UTF8
+            }
+          }
+          foreach ($path in @("version.json", "config\version.json")) {
+            if (Test-Path $path) {
+              $manifest = Get-Content $path -Raw | ConvertFrom-Json
+              $manifest.version = $version
+              $manifest.channel = $channel
+              $manifest | ConvertTo-Json -Depth 20 | Set-Content $path -Encoding UTF8
+            }
+          }
+          if (Test-Path "config\v2_settings.json") {
+            $v2 = Get-Content "config\v2_settings.json" -Raw | ConvertFrom-Json
+            $v2.version = $version
+            $v2.update.channel = $channel
+            $v2 | ConvertTo-Json -Depth 20 | Set-Content "config\v2_settings.json" -Encoding UTF8
+          }
 
       - name: Build onefile EXE
         shell: pwsh
         run: |
           .\build_v2_exe.ps1
 
-      - name: Generate version.json
+      - name: Generate release assets
         shell: pwsh
         run: |
           $exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
           $exePath = Join-Path "dist" $exeName
+          $releaseAsset = "TongYangCustomsPlatform.exe"
           python scripts/make_release_manifest.py `
             --repo "${{ github.repository }}" `
             --tag "${{ steps.vars.outputs.tag }}" `
             --version "${{ steps.vars.outputs.version }}" `
             --exe $exePath `
+            --asset-name $releaseAsset `
             --channel "${{ steps.vars.outputs.channel }}" `
             --output "dist/version.json"
-
-      - name: Generate SHA256
-        shell: pwsh
-        run: |
-          $exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-          $exePath = Join-Path "dist" $exeName
           $hash = (Get-FileHash -Algorithm SHA256 $exePath).Hash.ToLower()
-          [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $exeName`n", [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $releaseAsset`n", [Text.UTF8Encoding]::new($false))
+          Copy-Item -LiteralPath $exePath -Destination (Join-Path $env:RUNNER_TEMP $releaseAsset) -Force
 
-      - name: Create or update GitHub Release
+      - name: Upload dev build artifact
+        if: steps.vars.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-build-${{ steps.vars.outputs.version }}
+          path: |
+            dist/通洋報關平台.exe
+            dist/version.json
+            dist/SHA256.txt
+
+      - name: Create or update stable GitHub Release
+        if: steps.vars.outputs.publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ steps.vars.outputs.tag }}"
           $title = "AI Customs ERP V2 ${{ steps.vars.outputs.version }}"
-          $notes = "${{ steps.vars.outputs.channel }} release $tag"
-          $exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-          $files = @(
-            (Join-Path "dist" $exeName),
-            "dist\version.json",
-            "dist\SHA256.txt"
-          )
+          $notes = "stable release $tag"
+          $releaseAsset = Join-Path $env:RUNNER_TEMP "TongYangCustomsPlatform.exe"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f $tag "${{ github.sha }}"
+          git push origin -f $tag
 
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $files --clobber
-            if ("${{ steps.vars.outputs.prerelease }}" -eq "true") {
-              gh release edit $tag --title $title --notes $notes --prerelease --latest=false
-            } else {
-              gh release edit $tag --title $title --notes $notes --latest
-            }
+            gh release upload $tag $releaseAsset "dist\version.json" "dist\SHA256.txt" --clobber
+            gh release edit $tag --title $title --notes $notes --latest
           } else {
-            if ("${{ steps.vars.outputs.prerelease }}" -eq "true") {
-              gh release create $tag $files --title $title --notes $notes --prerelease --latest=false
-            } else {
-              gh release create $tag $files --title $title --notes $notes --latest
-            }
+            gh release create $tag $releaseAsset "dist\version.json" "dist\SHA256.txt" --title $title --notes $notes --latest
           }

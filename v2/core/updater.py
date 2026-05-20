@@ -6,12 +6,13 @@ import os
 import subprocess
 import sys
 import tempfile
-import urllib.parse
-import urllib.request
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+
+import requests
 
 from v2.core.settings import UpdateSettings, local_manifest_path, logs_dir, resolve_local_version, settings_path
 
@@ -54,6 +55,14 @@ class V2Updater:
         self.log_path = logs_dir() / "update-debug.log"
 
     def check(self) -> UpdateCheck:
+        self.current_version = resolve_local_version()
+        if self.settings.channel == "dev":
+            self._log(
+                f"dev channel current local_version_path={self.local_version_path} "
+                f"local_version={self.current_version} should_show_popup=False"
+            )
+            return UpdateCheck("current", f"DEV {self.current_version}，開發環境不檢查 stable 更新。", None, 0, False)
+
         if not self.settings.enabled:
             self._log(
                 f"update disabled local_version_path={self.local_version_path} "
@@ -109,10 +118,7 @@ class V2Updater:
         return target
 
     def _load_manifest(self) -> UpdateManifest:
-        if self.settings.channel == "beta":
-            manifest = self._load_beta_manifest()
-        else:
-            manifest = _read_json_url(self.settings.stable_manifest_url)
+        manifest = _read_json_url(self.settings.stable_manifest_url)
 
         return UpdateManifest(
             version=str(manifest.get("version", "")).strip(),
@@ -121,20 +127,6 @@ class V2Updater:
             channel=str(manifest.get("channel", self.settings.channel)).strip() or self.settings.channel,
             notes=str(manifest.get("notes", "")),
         )
-
-    def _load_beta_manifest(self) -> dict:
-        releases = _read_json_url(self.settings.beta_repo_api_url)
-        if not isinstance(releases, list):
-            raise RuntimeError("GitHub beta release API 回傳格式不正確")
-
-        for release in releases:
-            if not release.get("prerelease"):
-                continue
-            assets = release.get("assets", [])
-            manifest_asset = next((asset for asset in assets if asset.get("name") == "version.json"), None)
-            if manifest_asset:
-                return _read_json_url(manifest_asset["browser_download_url"])
-        raise RuntimeError("找不到 beta release version.json")
 
     def _download(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> Path:
         if not manifest.download_url:
@@ -146,20 +138,29 @@ class V2Updater:
         target.unlink(missing_ok=True)
         self._log(f"download start {manifest.download_url} -> {target}")
 
-        with _open_url(manifest.download_url, timeout=120) as response:
+        started = time.monotonic()
+        with requests.get(manifest.download_url, stream=True, timeout=(10, 180)) as response:
+            response.raise_for_status()
             total = int(response.headers.get("Content-Length") or 0)
             downloaded = 0
             with target.open("wb") as handle:
-                while True:
-                    chunk = response.read(1024 * 256)
+                for chunk in response.iter_content(chunk_size=1024 * 256):
                     if not chunk:
-                        break
+                        continue
                     handle.write(chunk)
                     downloaded += len(chunk)
                     percent = 0
                     if total > 0:
                         percent = min(89, max(1, int(downloaded * 89 / total)))
-                    self._emit_progress(progress, "downloading", percent, f"下載中 {downloaded // 1024} KB")
+                    elapsed = max(0.001, time.monotonic() - started)
+                    mb = downloaded / (1024 * 1024)
+                    total_mb = total / (1024 * 1024) if total else 0
+                    speed = mb / elapsed
+                    if total_mb:
+                        message = f"下載中 {mb:.1f}/{total_mb:.1f} MB ({percent}%) - {speed:.1f} MB/s"
+                    else:
+                        message = f"下載中 {mb:.1f} MB - {speed:.1f} MB/s"
+                    self._emit_progress(progress, "downloading", percent, message)
 
         digest = hashlib.sha256(target.read_bytes()).hexdigest().lower()
         self._log(f"verify sha256 actual={digest} expected={manifest.sha256}")
@@ -208,26 +209,16 @@ class V2Updater:
 
 
 def _read_json_url(url: str) -> dict | list:
-    with _open_url(url, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
-def _open_url(url: str, timeout: int):
-    request = urllib.request.Request(
-        _quote_url(url),
+    response = requests.get(
+        url,
+        timeout=(10, 30),
         headers={
             "User-Agent": "AI-Customs-ERP-V2/1.0",
-            "Accept": "application/json, application/octet-stream;q=0.9, */*;q=0.8",
+            "Accept": "application/json",
         },
     )
-    return urllib.request.urlopen(request, timeout=timeout)
-
-
-def _quote_url(url: str) -> str:
-    parsed = urllib.parse.urlsplit(url)
-    path = urllib.parse.quote(parsed.path, safe="/%")
-    query = urllib.parse.quote(parsed.query, safe="=&%")
-    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, query, parsed.fragment))
+    response.raise_for_status()
+    return response.json()
 
 
 def _version_key(value: str) -> tuple[int, ...]:

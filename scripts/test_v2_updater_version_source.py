@@ -79,6 +79,21 @@ def main() -> None:
         older_result = updater.check()
         if older_result.should_show_popup:
             raise RuntimeError("remote older version must not show update popup")
+
+        dev_called = False
+        dev_updater = V2Updater("0.0.0", UpdateSettings(enabled=True, channel="dev"))
+
+        def fail_load() -> updater_module.UpdateManifest:
+            nonlocal dev_called
+            dev_called = True
+            raise RuntimeError("dev channel must not load remote manifest")
+
+        dev_updater._load_manifest = fail_load  # type: ignore[method-assign]
+        dev_result = dev_updater.check()
+        if dev_called:
+            raise RuntimeError("dev channel attempted remote manifest load")
+        if dev_result.status != "current" or dev_result.should_show_popup:
+            raise RuntimeError("dev channel must be treated as current")
     finally:
         settings_module.app_base_dir = original_app_base_dir  # type: ignore[assignment]
         updater_module.local_manifest_path = original_updater_local_manifest_path  # type: ignore[assignment]

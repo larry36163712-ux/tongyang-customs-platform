@@ -723,8 +723,8 @@ class CustomsErpWindow(QMainWindow):
         startup = QCheckBox("啟動時檢查更新")
         startup.setChecked(self.settings.update.check_on_startup)
         channel = QComboBox()
-        channel.addItems(["stable", "beta"])
-        channel.setCurrentText(self.settings.update.channel if self.settings.update.channel in {"stable", "beta"} else "stable")
+        channel.addItems(["dev", "stable"])
+        channel.setCurrentText(self.settings.update.channel if self.settings.update.channel in {"dev", "stable"} else "stable")
 
         layout.addWidget(enabled)
         layout.addWidget(startup)

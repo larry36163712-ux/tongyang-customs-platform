@@ -13,13 +13,15 @@ def main() -> None:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--exe", required=True)
+    parser.add_argument("--asset-name", default="")
     parser.add_argument("--output", default="version.json")
-    parser.add_argument("--channel", default="stable", choices=("stable", "beta"))
+    parser.add_argument("--channel", default="stable", choices=("stable", "dev"))
     args = parser.parse_args()
 
     exe_path = Path(args.exe)
     digest = hashlib.sha256(exe_path.read_bytes()).hexdigest()
-    encoded_name = quote(exe_path.name)
+    asset_name = args.asset_name or exe_path.name
+    encoded_name = quote(asset_name)
     manifest = {
         "app_name": "通洋報關平台",
         "version": args.version.lstrip("v"),
