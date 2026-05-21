@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "rule_id": "CUSTOMER_SHIKEN_MULTI_SUPPLIER_INV_PKG",
+      "scope": "customer",
+      "enabled": true,
+      "applies_when": {
+        "customer": "詩肯"
+      },
+      "priority": 100,
+      "description": "詩肯案件允許同客戶多供應商 INV / PKG 格式，需使用客戶模板學習與多格式 parser 辨識。",
+      "calculation": {
+        "type": "template_learning_hint",
+        "document_types": ["INV", "PKG"],
+        "allow_multiple_supplier_templates": true
+      },
+      "warning_level": "info",
+      "source": "客戶模板需求"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "rule_id": "CASE_MANUAL_RELEASE_METHOD",
+      "scope": "case",
+      "enabled": true,
+      "applies_when": {
+        "case_tags": ["manual_release_method"]
+      },
+      "priority": 100,
+      "description": "單一案件可手動指定 C1 / C2 / C3M / C3X，僅限該案件生效。",
+      "calculation": {
+        "type": "case_override",
+        "allowed_values": ["C1", "C2", "C3M", "C3X"],
+        "field": "release_method"
+      },
+      "warning_level": "info",
+      "source": "manual case operation"
+    }
+  ]
+}
