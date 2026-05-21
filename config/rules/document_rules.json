@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "rule_id": "DOCUMENT_BOOKING_SO_PARSER",
+      "scope": "document",
+      "enabled": true,
+      "applies_when": {
+        "document_type": ["BOOKING", "S/O", "BOOKING_CONFIRMATION"]
+      },
+      "priority": 100,
+      "description": "Booking / S/O 文件需抽取 booking no、船名航次、POL、POD、ETD、ETA、櫃號、封條、件數、毛重、CBM。",
+      "calculation": {
+        "type": "parser_required_fields",
+        "fields": [
+          "booking_no",
+          "shipping_order_no",
+          "vessel_voyage",
+          "pol",
+          "pod",
+          "etd",
+          "eta",
+          "container_no",
+          "seal_no",
+          "package_count",
+          "gross_weight",
+          "cbm"
+        ]
+      },
+      "warning_level": "warning",
+      "source": "document parser contract"
+    },
+    {
+      "rule_id": "DOCUMENT_DS2_PARSER",
+      "scope": "document",
+      "enabled": true,
+      "applies_when": {
+        "document_type": "DS2"
+      },
+      "priority": 110,
+      "description": "DS2 parser 需抽取報單核心欄位供 audit engine 比對。",
+      "calculation": {
+        "type": "parser_required_fields",
+        "fields": [
+          "description",
+          "quantity",
+          "package_count",
+          "net_weight",
+          "gross_weight",
+          "amount",
+          "currency",
+          "container_no",
+          "seal_no",
+          "vessel_voyage",
+          "port",
+          "hs_code",
+          "tax_rate",
+          "tax_amount"
+        ]
+      },
+      "warning_level": "warning",
+      "source": "document parser contract"
+    }
+  ]
+}

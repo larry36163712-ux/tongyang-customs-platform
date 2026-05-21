@@ -1,0 +1,6 @@
+{
+  "deprecated": true,
+  "replacement": "config/rules/",
+  "note": "Legacy flat rules are intentionally disabled. Company/customer/route/case/document rules must be loaded from config/rules/* and must be gated by applies_when.",
+  "rules": []
+}

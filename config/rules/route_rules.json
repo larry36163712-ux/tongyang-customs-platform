@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "rule_id": "ROUTE_VIETNAM_CFS_REVIEW",
+      "scope": "route",
+      "enabled": true,
+      "applies_when": {
+        "shipment_type": "CFS",
+        "destination_country": "Vietnam"
+      },
+      "priority": 100,
+      "description": "越南 CFS 航線需提示檢查承攬方或公司規則是否存在；此規則只提示，不計算通盈費率。",
+      "calculation": {
+        "type": "route_review_hint",
+        "required_context": ["company", "forwarder", "destination_country", "shipment_type"]
+      },
+      "warning_level": "info",
+      "source": "route-specific review guard"
+    }
+  ]
+}

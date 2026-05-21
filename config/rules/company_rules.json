@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "rule_id": "COMPANY_TONG_YING_VN_CFS_CBM_FREIGHT",
+      "scope": "company",
+      "enabled": true,
+      "applies_when": {
+        "company": "通盈",
+        "shipment_type": "CFS",
+        "destination_country": "Vietnam"
+      },
+      "priority": 100,
+      "description": "通盈越南 CFS 案件依 CBM 計算運費；不得套用於非通盈、非 CFS、非越南案件。",
+      "calculation": {
+        "type": "freight_by_cbm",
+        "basis": "cbm",
+        "currency": "TWD",
+        "rate_table_ref": "company:tong_ying:vietnam:cfs:cbm"
+      },
+      "warning_level": "warning",
+      "source": "通盈公司規則；需由 applies_when 限制啟用"
+    },
+    {
+      "rule_id": "COMPANY_TONG_YING_CONTAINER_FIXED_FREIGHT",
+      "scope": "company",
+      "enabled": true,
+      "applies_when": {
+        "company": "通盈",
+        "shipment_type": "FCL",
+        "container_size": ["20FT", "40FT"]
+      },
+      "priority": 110,
+      "description": "通盈 FCL 案件可依 20 呎 / 40 呎固定運費設定核對；不得作為全域規則。",
+      "calculation": {
+        "type": "fixed_freight_by_container_size",
+        "rate_table_ref": "company:tong_ying:fcl:fixed_freight"
+      },
+      "warning_level": "warning",
+      "source": "通盈公司規則；需由 applies_when 限制啟用"
+    },
+    {
+      "rule_id": "COMPANY_TONG_YING_INSURANCE_FORMULA",
+      "scope": "company",
+      "enabled": true,
+      "applies_when": {
+        "company": "通盈"
+      },
+      "priority": 120,
+      "description": "通盈保險公式與最低保費只適用於通盈案件，不得套用於所有案件。",
+      "calculation": {
+        "type": "insurance_formula",
+        "rate_ref": "company:tong_ying:insurance_rate",
+        "minimum_premium": 400,
+        "currency": "TWD"
+      },
+      "warning_level": "warning",
+      "source": "通盈公司規則；需由 applies_when 限制啟用"
+    }
+  ]
+}

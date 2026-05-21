@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "rule_id": "GLOBAL_DECLARATION_IS_CORE",
+      "scope": "global",
+      "enabled": true,
+      "applies_when": {},
+      "priority": 10,
+      "description": "報單是案件核對的核心資料，來源文件需與報單逐欄核對。",
+      "calculation": {
+        "type": "compare_declaration_with_documents",
+        "base_document": "DS2",
+        "source_documents": ["INV", "PKG", "B/L", "Arrival Notice", "Clearance List"]
+      },
+      "warning_level": "warning",
+      "source": "AI_CONTRACT.md"
+    },
+    {
+      "rule_id": "GLOBAL_COMPARE_COMMON_FIELDS",
+      "scope": "global",
+      "enabled": true,
+      "applies_when": {},
+      "priority": 20,
+      "description": "品名、數量、件數、重量、金額、幣別、櫃號、封條、船名航次、港口、稅則、稅率、稅額需核對。",
+      "calculation": {
+        "type": "field_compare",
+        "fields": [
+          "description",
+          "quantity",
+          "package_count",
+          "net_weight",
+          "gross_weight",
+          "amount",
+          "currency",
+          "container_no",
+          "seal_no",
+          "vessel_voyage",
+          "port",
+          "hs_code",
+          "tax_rate",
+          "tax_amount"
+        ]
+      },
+      "warning_level": "warning",
+      "source": "AI_CONTRACT.md"
+    }
+  ]
+}
