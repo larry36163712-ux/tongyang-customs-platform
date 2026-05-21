@@ -6,27 +6,27 @@ https://github.com/larry36163712-ux/tongyang-customs-platform
 
 ## DEV Release Asset Contract
 
-The Windows executable release asset must be named exactly:
+The GitHub Release executable asset must be named exactly:
 
-`通洋報關平台.exe`
+`TongYangCustomsPlatform.exe`
+
+This only affects the GitHub Release asset filename. UI text, window title, product name, and company name remain `通洋報關平台`.
 
 Do not use generated placeholder names or old executable aliases.
 
-Generated placeholder, old alias, or romanized executable names are forbidden.
-
 The release manifest must point to the same asset name:
 
-`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/<tag>/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe`
+`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/<tag>/TongYangCustomsPlatform.exe`
 
 ## Required Assets
 
 Every DEV prerelease must include:
 
-- `通洋報關平台.exe`
+- `TongYangCustomsPlatform.exe`
 - `version.json`
 - `SHA256.txt`
 
-The upload pipeline must fail if GitHub returns any executable asset name other than `通洋報關平台.exe`.
+The upload pipeline must fail if GitHub returns any executable asset name other than `TongYangCustomsPlatform.exe`.
 
 ## Stable Release
 

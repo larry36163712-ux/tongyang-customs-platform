@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 if (-not $env:GH_TOKEN) {
     throw "GH_TOKEN is required."
 }
-$RequiredExecutableName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+$RequiredExecutableName = "TongYangCustomsPlatform.exe"
 
 if (-not (Test-Path -LiteralPath $Path)) {
     throw "Asset file not found: $Path"
@@ -21,6 +21,7 @@ if ($AssetName -ne $RequiredExecutableName -and $Path.ToLowerInvariant().EndsWit
 }
 
 $blockedFallbackExeName = ("default" + ".exe")
+$localChineseExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
 
 $headers = @{
     Authorization = "Bearer $env:GH_TOKEN"
@@ -35,9 +36,17 @@ $release = Invoke-RestMethod `
     -Headers $headers
 
 foreach ($asset in $release.assets) {
-    if ($asset.name -eq $AssetName -or ($Path.ToLowerInvariant().EndsWith(".exe") -and $asset.name -eq $blockedFallbackExeName)) {
+    if ($asset.name -eq $AssetName -or ($Path.ToLowerInvariant().EndsWith(".exe") -and ($asset.name -eq $blockedFallbackExeName -or $asset.name -eq $localChineseExeName))) {
         Invoke-RestMethod -Method Delete -Uri $asset.url -Headers $headers | Out-Null
     }
+}
+
+$uploadPath = (Resolve-Path -LiteralPath $Path).Path
+$tempUploadPath = $null
+if ($Path.ToLowerInvariant().EndsWith(".exe") -and (Split-Path -Leaf $uploadPath) -ne $AssetName) {
+    $tempUploadPath = Join-Path ([System.IO.Path]::GetTempPath()) $AssetName
+    Copy-Item -Force -LiteralPath $uploadPath -Destination $tempUploadPath
+    $uploadPath = $tempUploadPath
 }
 
 $builder = [System.UriBuilder]::new("https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets")
@@ -47,7 +56,11 @@ $uploaded = Invoke-RestMethod `
     -Uri $builder.Uri `
     -Headers $headers `
     -ContentType $ContentType `
-    -InFile (Resolve-Path -LiteralPath $Path).Path
+    -InFile $uploadPath
+
+if ($tempUploadPath) {
+    Remove-Item -Force -LiteralPath $tempUploadPath -ErrorAction SilentlyContinue
+}
 
 if ($uploaded.name -ne $AssetName) {
     Invoke-RestMethod -Method Delete -Uri $uploaded.url -Headers $headers | Out-Null

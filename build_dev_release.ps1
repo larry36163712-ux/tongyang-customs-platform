@@ -99,8 +99,9 @@ if ($Version -notmatch "^\d+\.\d+\.\d+-dev$") {
 }
 
 $tag = "DEV-$Version"
-$assetName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-$exePath = Join-Path $root "dist\$assetName"
+$localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+$assetName = "TongYangCustomsPlatform.exe"
+$exePath = Join-Path $root "dist\$localExeName"
 $distVersionPath = Join-Path $root "dist\config\version.json"
 $distReleaseManifestPath = Join-Path $root "dist\version.json"
 $shaPath = Join-Path $root "dist\SHA256.txt"

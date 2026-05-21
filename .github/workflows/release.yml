@@ -1,4 +1,4 @@
-﻿name: Build and Release AI Customs ERP V2
+name: Build and Release AI Customs ERP V2
 
 on:
   workflow_dispatch:
@@ -83,7 +83,7 @@ jobs:
           $version = "${{ steps.vars.outputs.version }}"
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
-          $assetName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+          $assetName = "TongYangCustomsPlatform.exe"
           $downloadUrl = "https://github.com/$repo/releases/download/$tag/$([Uri]::EscapeDataString($assetName))"
 
           $manifest = Get-Content "config\version.json" -Raw | ConvertFrom-Json
@@ -117,8 +117,9 @@ jobs:
           $version = "${{ steps.vars.outputs.version }}"
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
-          $assetName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-          $exePath = Join-Path "dist" $assetName
+          $localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+          $assetName = "TongYangCustomsPlatform.exe"
+          $exePath = Join-Path "dist" $localExeName
 
           python scripts/make_release_manifest.py `
             --repo $repo `
@@ -165,8 +166,9 @@ jobs:
           $latest = "${{ steps.vars.outputs.latest }}"
           $prerelease = "${{ steps.vars.outputs.prerelease }}"
           $title = $tag
-          $assetName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-          $exePath = Join-Path "dist" $assetName
+          $localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+          $assetName = "TongYangCustomsPlatform.exe"
+          $exePath = Join-Path "dist" $localExeName
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
