@@ -109,3 +109,28 @@ Business specificity must move downward:
 `global -> company/customer/route -> case -> document`
 
 A rule can be promoted to global only when it is documented as universally true for all cases.
+
+## Updater Architecture
+
+Updater channels are separated by manifest source.
+
+DEV updater:
+
+1. Source-mode DEV machines do not update themselves and read local `config/version.json`.
+2. Packaged DEV clients fetch `https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json`.
+3. `dev_version.json` contains `version`, `channel`, `download_url`, `sha256`, `build_time`, and optional `notes`.
+4. DEV updater compares local `config/version.json` with raw `config/dev_version.json`.
+5. When remote DEV is newer, it downloads `TongYangCustomsPlatform.exe`, verifies SHA256, schedules temp replacement, and restarts.
+6. DEV updater must not use GitHub `/releases/latest` and must not read `version.json` from GitHub Release assets.
+
+STABLE updater:
+
+1. Stable clients fetch `/releases/latest/download/version.json`.
+2. Stable releases are normal GitHub releases and may be marked latest.
+3. Stable updater must not consume DEV prerelease manifests.
+
+Release pipeline:
+
+1. DEV build generates `dist/version.json` and syncs the same manifest to `config/dev_version.json`.
+2. DEV build uploads release assets for direct EXE download, but update discovery uses raw `config/dev_version.json`.
+3. STABLE build keeps using GitHub latest release manifest discovery.
