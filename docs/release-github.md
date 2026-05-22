@@ -28,6 +28,10 @@ Every DEV prerelease must include:
 
 The upload pipeline must fail if GitHub returns any executable asset name other than `TongYangCustomsPlatform.exe`.
 
-## Stable Release
+## DEV and Stable Latest Rules
 
-Stable releases are separate from DEV releases. DEV prereleases must not be marked as latest and must not overwrite stable release assets.
+Stable releases are separate from DEV releases.
+
+DEV releases are prereleases and must not depend on GitHub `/releases/latest`. GitHub does not allow prereleases to become the latest release endpoint target. DEV validation must use the tag-specific release API or tag-specific asset URLs.
+
+Stable releases are normal releases, use stable `vX.X.X` tags, and may be marked as GitHub latest.
