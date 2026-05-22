@@ -90,6 +90,7 @@ if (-not ($SkipPush -and $SkipRelease)) {
 }
 
 $configVersionPath = Join-Path $root "config\version.json"
+$devVersionPath = Join-Path $root "config\dev_version.json"
 $manifest = Read-JsonFile $configVersionPath
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-NextDevVersion ([string]$manifest.version)
@@ -165,6 +166,7 @@ Invoke-Step "Sync DEV version files" {
             $settings | Add-Member -MemberType NoteProperty -Name update -Value ([pscustomobject]@{})
         }
         $settings.update.channel = "dev"
+        $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$Repo/$Branch/config/dev_version.json"
         Write-JsonFile $settings $settingsPath
     }
 }
@@ -196,6 +198,7 @@ Invoke-Step "Generate assets and manifests" {
     $releaseManifest = Read-JsonFile $distReleaseManifestPath
     New-Item -ItemType Directory -Force -Path (Split-Path $distVersionPath) | Out-Null
     Write-JsonFile $releaseManifest $configVersionPath
+    Write-JsonFile $releaseManifest $devVersionPath
     Write-JsonFile $releaseManifest $distVersionPath
 
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
@@ -223,7 +226,7 @@ Invoke-Step "Generate release notes" {
 }
 
 Invoke-Step "Commit release changes" {
-    & $git add config\version.json config\v2_settings.json build_dev_release.ps1 check_github_release_auth.ps1 .github\workflows\release.yml scripts\make_release_manifest.py
+    & $git add config\version.json config\dev_version.json config\v2_settings.json build_dev_release.ps1 .github\workflows\release.yml scripts\make_release_manifest.py scripts\upload_release_asset.ps1 scripts\verify_release_assets.ps1 scripts\check_github_release_auth.ps1
     Assert-ExitCode "git add failed"
 
     $hasChanges = & $git status --porcelain
@@ -246,10 +249,10 @@ if (-not $SkipRelease) {
     Invoke-Step "Create or update DEV prerelease" {
         & $gh release view $tag --repo $Repo *> $null
         if ($LASTEXITCODE -eq 0) {
-            & $gh release edit $tag --repo $Repo --title $tag --notes-file $notesPath --prerelease --latest=false
+            & $gh release edit $tag --repo $Repo --title $tag --notes-file $notesPath --prerelease
             Assert-ExitCode "gh release edit failed"
         } else {
-            & $gh release create $tag --repo $Repo --title $tag --notes-file $notesPath --prerelease --latest=false
+            & $gh release create $tag --repo $Repo --title $tag --notes-file $notesPath --prerelease
             Assert-ExitCode "gh release create failed"
         }
         powershell -ExecutionPolicy Bypass -File .\scripts\upload_release_asset.ps1 `
@@ -260,6 +263,11 @@ if (-not $SkipRelease) {
             -ContentType "application/octet-stream"
         & $gh release upload $tag $shaPath $distReleaseManifestPath --repo $Repo --clobber
         Assert-ExitCode "gh release upload failed"
+
+        powershell -ExecutionPolicy Bypass -File .\scripts\verify_release_assets.ps1 `
+            -Repo $Repo `
+            -Tag $tag `
+            -RequiredAssets "TongYangCustomsPlatform.exe","version.json","SHA256.txt"
     }
 }
 
