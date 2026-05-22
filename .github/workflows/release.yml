@@ -96,6 +96,7 @@ jobs:
           if (Test-Path "config\v2_settings.json") {
             $settings = Get-Content "config\v2_settings.json" -Raw | ConvertFrom-Json
             $settings.update.channel = $channel
+            $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
             $settings | ConvertTo-Json -Depth 30 | Set-Content "config\v2_settings.json" -Encoding UTF8
           }
 
@@ -133,9 +134,27 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist\config" | Out-Null
           Copy-Item -LiteralPath "dist\version.json" -Destination "dist\config\version.json" -Force
           Copy-Item -LiteralPath "dist\version.json" -Destination "config\version.json" -Force
+          if ($channel -eq "dev") {
+            Copy-Item -LiteralPath "dist\version.json" -Destination "config\dev_version.json" -Force
+          }
 
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
           [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $assetName`n", [Text.UTF8Encoding]::new($false))
+
+      - name: Commit manifest updates
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add config\version.json config\dev_version.json config\v2_settings.json
+          $changes = git status --porcelain
+          if ($changes) {
+            git commit -m "chore: sync ${{ steps.vars.outputs.channel }} manifest ${{ steps.vars.outputs.version }} [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          } else {
+            Write-Host "No manifest changes to commit."
+          }
 
       - name: Generate release notes
         shell: pwsh
@@ -179,7 +198,13 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release edit $tag --title $title --notes-file "dist\release-notes.md"
           } else {
-            gh release create $tag --title $title --notes-file "dist\release-notes.md"
+            if ($prerelease -eq "true") {
+              gh release create $tag --title $title --notes-file "dist\release-notes.md" --prerelease
+            } elseif ($latest -eq "true") {
+              gh release create $tag --title $title --notes-file "dist\release-notes.md" --latest
+            } else {
+              gh release create $tag --title $title --notes-file "dist\release-notes.md"
+            }
           }
 
           .\scripts\upload_release_asset.ps1 `
@@ -192,8 +217,21 @@ jobs:
           gh release upload $tag "dist\SHA256.txt" "dist\version.json" --clobber
 
           if ($prerelease -eq "true") {
-            gh release edit $tag --prerelease --latest=false
+            gh release edit $tag --prerelease
           } elseif ($latest -eq "true") {
             gh release edit $tag --latest
+          }
+
+          if ($latest -eq "true") {
+            .\scripts\verify_release_assets.ps1 `
+              -Repo "${{ github.repository }}" `
+              -Tag $tag `
+              -RequireLatest `
+              -RequiredAssets "TongYangCustomsPlatform.exe","version.json","SHA256.txt"
+          } else {
+            .\scripts\verify_release_assets.ps1 `
+              -Repo "${{ github.repository }}" `
+              -Tag $tag `
+              -RequiredAssets "TongYangCustomsPlatform.exe","version.json","SHA256.txt"
           }
 
