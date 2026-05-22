@@ -1,9 +1,8 @@
 {
-  "app_name": "通洋報關平台",
   "version": "1.1.2-dev.9",
+  "channel": "dev",
   "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/DEV-1.1.2-dev.9/TongYangCustomsPlatform.exe",
   "sha256": "a49aa207234210be0c6f511f0e00e30de4a833e4a7c77454a3a11bddee8dcbe6",
-  "channel": "dev",
   "build_time": "2026-05-21T15:58:08Z",
   "notes": "DEV release DEV-1.1.2-dev.9"
 }

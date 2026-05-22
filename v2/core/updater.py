@@ -33,6 +33,7 @@ class UpdateManifest:
     sha256: str
     channel: str
     notes: str = ""
+    build_time: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -42,6 +43,7 @@ class UpdateManifest:
             "sha256": self.sha256,
             "channel": self.channel,
             "notes": self.notes,
+            "build_time": self.build_time,
         }
 
 
@@ -63,7 +65,7 @@ class V2Updater:
 
     def check(self) -> UpdateCheck:
         self.current_version = resolve_local_version()
-        if self.settings.channel == "dev":
+        if self.settings.channel == "dev" and not getattr(sys, "frozen", False):
             self._log(
                 f"dev channel current local_version_path={self.local_version_path} "
                 f"local_version={self.current_version} should_show_popup=False"
@@ -141,7 +143,12 @@ class V2Updater:
         )
 
     def _load_manifest(self) -> UpdateManifest:
-        manifest = _read_json_url(self.settings.stable_manifest_url)
+        if self.settings.channel == "dev":
+            manifest_url = self.settings.dev_manifest_url
+        else:
+            manifest_url = self.settings.stable_manifest_url
+        self._log(f"manifest fetch channel={self.settings.channel} url={manifest_url}")
+        manifest = _read_json_url(manifest_url)
 
         return UpdateManifest(
             version=str(manifest.get("version", "")).strip(),
@@ -149,6 +156,7 @@ class V2Updater:
             sha256=str(manifest.get("sha256", "")).strip().lower(),
             channel=str(manifest.get("channel", self.settings.channel)).strip() or self.settings.channel,
             notes=str(manifest.get("notes", "")),
+            build_time=str(manifest.get("build_time", "")),
         )
 
     def _download(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> Path:

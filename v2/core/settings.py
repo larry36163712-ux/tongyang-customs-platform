@@ -12,10 +12,12 @@ class UpdateSettings:
     enabled: bool = True
     check_on_startup: bool = True
     channel: str = "stable"
+    dev_manifest_url: str = (
+        "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json"
+    )
     stable_manifest_url: str = (
         "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json"
     )
-    beta_repo_api_url: str = "https://api.github.com/repos/larry36163712-ux/tongyang-customs-platform/releases"
 
 
 @dataclass
@@ -100,13 +102,18 @@ def load_settings() -> V2Settings:
             enabled=bool(update_data.get("enabled", True)),
             check_on_startup=bool(update_data.get("check_on_startup", True)),
             channel=channel,
+            dev_manifest_url=str(
+                update_data.get(
+                    "dev_manifest_url",
+                    UpdateSettings.dev_manifest_url,
+                )
+            ),
             stable_manifest_url=str(
                 update_data.get(
                     "stable_manifest_url",
                     UpdateSettings.stable_manifest_url,
                 )
             ),
-            beta_repo_api_url=str(update_data.get("beta_repo_api_url", UpdateSettings.beta_repo_api_url)),
         ),
     )
 

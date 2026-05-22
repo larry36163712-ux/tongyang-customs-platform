@@ -67,3 +67,57 @@ Those rules are company, customer, route, or case specific. They must only activ
 Parsers classify and extract data. Parsers do not decide whether a business rule applies, except to provide evidence fields used by rule activation.
 
 Rule activation remains the responsibility of the rule engine.
+
+## Human-first Workflow Principle
+
+AI Customs ERP is not a parser showcase. Its core product is a customs broker decision and audit workflow system.
+
+Permanent workflow and UI rules:
+
+1. Developer-console-first UI is prohibited.
+2. Raw parser object rendering is prohibited.
+3. Parser confidence must not be the primary information on the main screen.
+4. Every workflow must prioritize missing documents, differences, high-risk fields, declaration readiness, and AI audit summaries.
+5. Parser, OCR, and debug details are secondary layers only.
+6. UI flows must simulate the real customs declaration review process.
+7. Case workflow must be case-centered, not document-centered.
+8. The system core is the AI Audit Summary Engine, not a parser viewer.
+9. Every compare result must be convertible into a human-readable audit result.
+10. System design priority is:
+
+```text
+Human workflow
+> Audit clarity
+> Workflow grouping
+> Compare intelligence
+> Parser debug
+```
+
+## Development Lifecycle Rules
+
+DEV and STABLE release channels must remain separate.
+
+DEV channel rules:
+
+1. DEV releases must be GitHub prereleases.
+2. DEV releases must use tags formatted as `DEV-x.x.x-dev.x`.
+3. DEV updater logic must not depend on GitHub `/releases/latest`.
+4. Source-mode DEV machines are treated as current and must read local `config/version.json` as the version source.
+5. Packaged DEV clients must read `config/dev_version.json` through raw.githubusercontent.com.
+6. DEV validation may read the tag-specific release API or raw `config/dev_version.json`, but it must not use GitHub latest badge behavior.
+7. DEV updater logic must not read `version.json` from GitHub Release assets.
+
+STABLE channel rules:
+
+1. Stable releases must use tags formatted as `vX.X.X`.
+2. Stable releases may be marked as GitHub latest.
+3. Stable updater logic may use `/releases/latest/download/version.json`.
+4. Stable update checks must not consume DEV prerelease manifests.
+
+Release pipeline rules:
+
+1. DEV pipeline creates prereleases and uploads `TongYangCustomsPlatform.exe`, `version.json`, and `SHA256.txt`.
+2. DEV pipeline updates `config/dev_version.json` after every DEV build.
+3. DEV pipeline verifies tag-specific assets and download URLs, not `/releases/latest`.
+4. STABLE pipeline creates normal releases and verifies `/releases/latest`.
+5. GitHub Release asset executable name is always `TongYangCustomsPlatform.exe`.

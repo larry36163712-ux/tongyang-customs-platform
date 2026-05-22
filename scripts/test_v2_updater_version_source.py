@@ -104,7 +104,29 @@ def main() -> None:
         if dev_called:
             raise RuntimeError("dev channel attempted remote manifest load")
         if dev_result.status != "current" or dev_result.should_show_popup:
-            raise RuntimeError("dev channel must be treated as current")
+            raise RuntimeError("source dev channel must be treated as current")
+
+        original_frozen = getattr(sys, "frozen", None)
+        sys.frozen = True  # type: ignore[attr-defined]
+        try:
+            frozen_dev_updater = V2Updater(
+                "0.0.0",
+                UpdateSettings(
+                    enabled=True,
+                    channel="dev",
+                    dev_manifest_url="https://raw.githubusercontent.com/example/repo/main/config/dev_version.json",
+                ),
+            )
+            frozen_dev_remote = updater_module.UpdateManifest("1.0.3", "local", "abc", "dev")
+            frozen_dev_updater._load_manifest = lambda: frozen_dev_remote  # type: ignore[method-assign]
+            frozen_dev_result = frozen_dev_updater.check()
+            if frozen_dev_result.status != "available" or not frozen_dev_result.should_show_popup:
+                raise RuntimeError("frozen dev channel must compare against dev manifest")
+        finally:
+            if original_frozen is None:
+                delattr(sys, "frozen")
+            else:
+                sys.frozen = original_frozen  # type: ignore[attr-defined]
     finally:
         settings_module.app_base_dir = original_app_base_dir  # type: ignore[assignment]
         updater_module.local_manifest_path = original_updater_local_manifest_path  # type: ignore[assignment]
