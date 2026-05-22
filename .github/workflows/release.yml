@@ -41,8 +41,7 @@ jobs:
             $channel = "${{ inputs.channel }}"
           } else {
             $manifest = Get-Content "config\version.json" -Raw | ConvertFrom-Json
-            $base = "$($manifest.version)" -replace "-dev$", ""
-            $version = "$base-dev.${{ github.run_number }}"
+            $version = "$($manifest.version)" -replace "-dev\.\d+$", "-dev"
             $channel = "dev"
           }
 
@@ -50,22 +49,20 @@ jobs:
             if ($version -notmatch "-dev") {
               throw "DEV releases must use a -dev version."
             }
-            $tag = "DEV-$version"
-            $prerelease = "true"
-            $latest = "false"
+            $version = $version -replace "-dev\.\d+$", "-dev"
+            $tag = "v$version"
+            $latest = "true"
           } else {
             if ($version -match "-dev") {
               throw "Stable releases cannot use a -dev version."
             }
             $tag = "v$version"
-            $prerelease = "false"
             $latest = "true"
           }
 
           "version=$version" >> $env:GITHUB_OUTPUT
           "channel=$channel" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
-          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
           "latest=$latest" >> $env:GITHUB_OUTPUT
 
       - name: Setup Python
@@ -84,7 +81,7 @@ jobs:
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
           $assetName = "TongYangCustomsPlatform.exe"
-          $downloadUrl = "https://github.com/$repo/releases/download/$tag/$([Uri]::EscapeDataString($assetName))"
+          $downloadUrl = "https://github.com/$repo/releases/latest/download/$([Uri]::EscapeDataString($assetName))"
 
           $manifest = Get-Content "config\version.json" -Raw | ConvertFrom-Json
           $manifest.version = $version
@@ -96,7 +93,7 @@ jobs:
           if (Test-Path "config\v2_settings.json") {
             $settings = Get-Content "config\v2_settings.json" -Raw | ConvertFrom-Json
             $settings.update.channel = $channel
-            $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
+            $settings.update.stable_manifest_url = "https://github.com/$repo/releases/latest/download/version.json"
             $settings | ConvertTo-Json -Depth 30 | Set-Content "config\v2_settings.json" -Encoding UTF8
           }
 
@@ -134,9 +131,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist\config" | Out-Null
           Copy-Item -LiteralPath "dist\version.json" -Destination "dist\config\version.json" -Force
           Copy-Item -LiteralPath "dist\version.json" -Destination "config\version.json" -Force
-          if ($channel -eq "dev") {
-            Copy-Item -LiteralPath "dist\version.json" -Destination "config\dev_version.json" -Force
-          }
 
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
           [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $assetName`n", [Text.UTF8Encoding]::new($false))
@@ -147,7 +141,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add config\version.json config\dev_version.json config\v2_settings.json
+          git add config\version.json config\v2_settings.json
           $changes = git status --porcelain
           if ($changes) {
             git commit -m "chore: sync ${{ steps.vars.outputs.channel }} manifest ${{ steps.vars.outputs.version }} [skip ci]"
@@ -182,56 +176,95 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ steps.vars.outputs.tag }}"
-          $latest = "${{ steps.vars.outputs.latest }}"
-          $prerelease = "${{ steps.vars.outputs.prerelease }}"
-          $title = $tag
+          $channel = "${{ steps.vars.outputs.channel }}"
+          $repo = "${{ github.repository }}"
           $localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
           $assetName = "TongYangCustomsPlatform.exe"
           $exePath = Join-Path "dist" $localExeName
+          $versionPath = "dist\version.json"
+          $shaPath = "dist\SHA256.txt"
+          $notesPath = "dist\release-notes.md"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f $tag "${{ github.sha }}"
           git push origin -f $tag
 
-          gh release view $tag *> $null
+          gh release view $tag --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release edit $tag --title $title --notes-file "dist\release-notes.md"
+            gh release edit $tag --repo $repo --title $tag --notes-file $notesPath --latest
           } else {
-            if ($prerelease -eq "true") {
-              gh release create $tag --title $title --notes-file "dist\release-notes.md" --prerelease
-            } elseif ($latest -eq "true") {
-              gh release create $tag --title $title --notes-file "dist\release-notes.md" --latest
-            } else {
-              gh release create $tag --title $title --notes-file "dist\release-notes.md"
-            }
+            gh release create $tag --repo $repo --title $tag --notes-file $notesPath --latest
           }
 
           .\scripts\upload_release_asset.ps1 `
-            -Repo "${{ github.repository }}" `
+            -Repo $repo `
             -Tag $tag `
             -Path $exePath `
             -AssetName $assetName `
             -ContentType "application/octet-stream"
 
-          gh release upload $tag "dist\SHA256.txt" "dist\version.json" --clobber
+          gh release upload $tag $versionPath $shaPath --repo $repo --clobber
 
-          if ($prerelease -eq "true") {
-            gh release edit $tag --prerelease
-          } elseif ($latest -eq "true") {
-            gh release edit $tag --latest
+          if ($channel -eq "dev") {
+            $releases = gh release list --repo $repo --limit 200 --json tagName | ConvertFrom-Json
+            foreach ($release in $releases) {
+              $name = [string]$release.tagName
+              $isDevRelease = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
+              if ($isDevRelease -and $name -ne $tag) {
+                Write-Host "Deleting old DEV release and tag: $name"
+                gh release delete $name --repo $repo --yes --cleanup-tag
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Failed to delete old DEV release: $name"
+                }
+              }
+            }
+
+            $tagRefs = gh api "repos/$repo/git/matching-refs/tags" --jq '.[].ref'
+            foreach ($ref in $tagRefs) {
+              $name = $ref -replace '^refs/tags/', ''
+              $isDevTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
+              if ($isDevTag -and $name -ne $tag) {
+                Write-Host "Deleting old DEV tag: $name"
+                gh api --method DELETE "repos/$repo/git/refs/tags/$name" | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                  throw "Failed to delete old DEV tag: $name"
+                }
+              }
+            }
           }
 
-          if ($latest -eq "true") {
-            .\scripts\verify_release_assets.ps1 `
-              -Repo "${{ github.repository }}" `
-              -Tag $tag `
-              -RequireLatest `
-              -RequiredAssets "TongYangCustomsPlatform.exe","version.json","SHA256.txt"
-          } else {
-            .\scripts\verify_release_assets.ps1 `
-              -Repo "${{ github.repository }}" `
-              -Tag $tag `
-              -RequiredAssets "TongYangCustomsPlatform.exe","version.json","SHA256.txt"
+          $release = gh api "repos/$repo/releases/tags/$tag" | ConvertFrom-Json
+          $assetNames = @($release.assets | ForEach-Object { $_.name })
+          foreach ($required in @("TongYangCustomsPlatform.exe", "version.json", "SHA256.txt")) {
+            if ($assetNames -notcontains $required) {
+              throw "Release $tag is missing required asset: $required. Current assets: $($assetNames -join ', ')"
+            }
           }
+
+          $latest = gh api "repos/$repo/releases/latest" | ConvertFrom-Json
+          if ($latest.tag_name -ne $tag) {
+            throw "/releases/latest points to '$($latest.tag_name)' instead of '$tag'."
+          }
+
+          $versionUrl = "https://github.com/$repo/releases/latest/download/version.json"
+          $exeUrl = "https://github.com/$repo/releases/latest/download/$assetName"
+          $versionResponse = Invoke-WebRequest -Method Head -Uri $versionUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
+          if ([int]$versionResponse.StatusCode -ne 200) {
+            throw "version.json URL returned HTTP $($versionResponse.StatusCode): $versionUrl"
+          }
+          $exeResponse = Invoke-WebRequest -Method Head -Uri $exeUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
+          if ([int]$exeResponse.StatusCode -ne 200) {
+            throw "EXE URL returned HTTP $($exeResponse.StatusCode): $exeUrl"
+          }
+
+          $remoteManifest = Invoke-RestMethod -Uri $versionUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"}
+          if ($remoteManifest.download_url -ne $exeUrl) {
+            throw "version.json download_url must be '$exeUrl'. Current value: '$($remoteManifest.download_url)'"
+          }
+
+          Write-Host "Release verified."
+          Write-Host "Latest tag: $tag"
+          Write-Host "version.json: $versionUrl"
+          Write-Host "EXE: $exeUrl"
 
