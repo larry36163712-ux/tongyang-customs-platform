@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -9,7 +8,6 @@ from pathlib import Path
 REQUIRED_DIRS = ("uploads", "logs", "database", "config", "parser_cache", "templates", "exports")
 DEFAULT_SETTINGS = """{
   "app_name": "通洋報關平台",
-  "version": "1.0.0",
   "release_methods": ["C1", "C2", "C3M", "C3X"],
   "uploads_dir": "uploads",
   "exports_dir": "exports",
@@ -24,7 +22,10 @@ DEFAULT_SETTINGS = """{
   },
   "update": {
     "enabled": true,
-    "version_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
+    "channel": "dev",
+    "version_url": "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json",
+    "dev_version_url": "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json",
+    "stable_version_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
     "check_on_startup": true
   },
   "sync": {
@@ -34,16 +35,6 @@ DEFAULT_SETTINGS = """{
   }
 }
 """
-DEFAULT_VERSION = """{
-  "app_name": "通洋報關平台",
-  "version": "1.0.0",
-  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/default.exe",
-  "sha256": "",
-  "notes": "GitHub Releases update manifest."
-}
-"""
-
-
 def app_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -63,19 +54,7 @@ def ensure_runtime_layout() -> Path:
 
     external_settings = base_dir / "config" / "settings.json"
     if not external_settings.exists():
-        source = bundled_base_dir() / "settings.json"
-        if source.exists():
-            shutil.copy2(source, external_settings)
-        else:
-            external_settings.write_text(DEFAULT_SETTINGS, encoding="utf-8")
-
-    external_version = base_dir / "config" / "version.json"
-    if not external_version.exists():
-        source = bundled_base_dir() / "version.json"
-        if source.exists():
-            shutil.copy2(source, external_version)
-        else:
-            external_version.write_text(DEFAULT_VERSION, encoding="utf-8")
+        external_settings.write_text(DEFAULT_SETTINGS, encoding="utf-8")
 
     return base_dir
 
