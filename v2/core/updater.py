@@ -33,6 +33,7 @@ class UpdateManifest:
     sha256: str
     channel: str
     notes: str = ""
+    build_time: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -42,6 +43,7 @@ class UpdateManifest:
             "sha256": self.sha256,
             "channel": self.channel,
             "notes": self.notes,
+            "build_time": self.build_time,
         }
 
 
@@ -63,10 +65,15 @@ class V2Updater:
 
     def check(self) -> UpdateCheck:
         self.current_version = resolve_local_version()
-        if self.settings.channel == "dev":
+        if self.settings.channel == "dev" and not getattr(sys, "frozen", False):
             self._log(
                 f"dev channel current local_version_path={self.local_version_path} "
                 f"local_version={self.current_version} should_show_popup=False"
+            )
+            version_debug_log(
+                f"local_version={self.current_version} remote_version=DEV_SKIPPED "
+                f"channel={self.settings.channel} remote_channel=DEV_SKIPPED "
+                "compare_result=0 should_show_popup=False"
             )
             return UpdateCheck("current", f"DEV {self.current_version}，開發環境不檢查 stable 更新。", None, 0, False)
 
@@ -95,7 +102,8 @@ class V2Updater:
         self._log(f"compare result={compare} should_show_popup={should_show_popup}")
         version_debug_log(
             f"local_version={self.current_version} remote_version={manifest.version} "
-            f"channel={self.settings.channel} compare_result={compare} should_show_popup={should_show_popup}"
+            f"channel={self.settings.channel} remote_channel={manifest.channel} "
+            f"compare_result={compare} should_show_popup={should_show_popup}"
         )
         if compare >= 0:
             self._log("update result=current should_show_popup=False")
@@ -112,24 +120,35 @@ class V2Updater:
             self._log(f"progress download completed path={downloaded}")
             self._emit_progress(progress, "verifying", 90, "正在驗證 SHA256")
             self._log(f"progress verify completed sha256={manifest.sha256}")
-            staged_manifest = self._stage_manifest(manifest)
+            self._sync_local_manifest(manifest)
             self._emit_progress(progress, "replacing", 96, "準備覆蓋主程式")
             self._log("progress replace scheduled")
             self._emit_progress(progress, "restarting", 100, "即將重新啟動")
-            self._schedule_replace(downloaded, staged_manifest)
+            self._schedule_replace(downloaded)
         except Exception as exc:
             self._log(f"apply failed: {exc}")
             return UpdateCheck("error", f"更新失敗，已保留目前版本：{exc}", manifest)
         return UpdateCheck("restarting", f"已下載新版 {manifest.version}，即將重新啟動。", manifest)
 
-    def _stage_manifest(self, manifest: UpdateManifest) -> Path:
-        target = Path(tempfile.gettempdir()) / "AI_Customs_ERP_V2.version.json"
+    def _sync_local_manifest(self, manifest: UpdateManifest) -> None:
+        target = local_manifest_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(manifest.as_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        self._log(f"staged manifest={target} version={manifest.version} channel={manifest.channel}")
-        return target
+        self.current_version = resolve_local_version()
+        self._log(f"local manifest synced path={target} version={self.current_version} channel={manifest.channel}")
+        version_debug_log(
+            f"local_version={self.current_version} remote_version={manifest.version} "
+            f"channel={manifest.channel} remote_channel={manifest.channel} "
+            "compare_result=0 should_show_popup=False update_completed_state=synced"
+        )
 
     def _load_manifest(self) -> UpdateManifest:
-        manifest = _read_json_url(self.settings.stable_manifest_url)
+        if self.settings.channel == "dev":
+            manifest_url = self.settings.dev_manifest_url
+        else:
+            manifest_url = self.settings.stable_manifest_url
+        self._log(f"manifest fetch channel={self.settings.channel} url={manifest_url}")
+        manifest = _read_json_url(manifest_url)
 
         return UpdateManifest(
             version=str(manifest.get("version", "")).strip(),
@@ -137,6 +156,7 @@ class V2Updater:
             sha256=str(manifest.get("sha256", "")).strip().lower(),
             channel=str(manifest.get("channel", self.settings.channel)).strip() or self.settings.channel,
             notes=str(manifest.get("notes", "")),
+            build_time=str(manifest.get("build_time", "")),
         )
 
     def _download(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> Path:
@@ -181,7 +201,7 @@ class V2Updater:
         self._log("verify ok")
         return target
 
-    def _schedule_replace(self, update_exe: Path, staged_manifest: Path) -> None:
+    def _schedule_replace(self, update_exe: Path) -> None:
         if not getattr(sys, "frozen", False):
             raise RuntimeError("目前不是 EXE 執行狀態，略過自動覆蓋")
 
@@ -195,9 +215,6 @@ class V2Updater:
             log_path=self.log_path,
             expected_sha256=hashlib.sha256(update_exe.read_bytes()).hexdigest().lower(),
             old_pid=os.getpid(),
-            staged_manifest=staged_manifest,
-            local_manifest=local_manifest_path(),
-            settings_file=settings_path(),
             restart=True,
             cleanup=True,
         )
@@ -260,9 +277,6 @@ def build_replace_script(
     log_path: Path,
     expected_sha256: str,
     old_pid: int,
-    staged_manifest: Path | None = None,
-    local_manifest: Path | None = None,
-    settings_file: Path | None = None,
     restart: bool = True,
     cleanup: bool = True,
 ) -> str:
@@ -273,26 +287,10 @@ def build_replace_script(
     )
     cleanup_lines = (
         'del /f /q "%UPDATE%" >> "%LOG%" 2>&1\n'
-        'if defined STAGED_MANIFEST del /f /q "%STAGED_MANIFEST%" >> "%LOG%" 2>&1\n'
         'del /f /q "%BACKUP%" >> "%LOG%" 2>&1'
         if cleanup
         else 'echo [%date% %time%] cleanup skipped >> "%LOG%"'
     )
-    manifest_env = ""
-    manifest_sync = 'echo [%date% %time%] manifest sync skipped >> "%LOG%"'
-    if staged_manifest and local_manifest and settings_file:
-        manifest_env = f"""set "STAGED_MANIFEST={staged_manifest}"
-set "LOCAL_MANIFEST={local_manifest}"
-set "SETTINGS_FILE={settings_file}"
-"""
-        manifest_sync = r"""if exist "%STAGED_MANIFEST%" (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:LOCAL_MANIFEST) | Out-Null; New-Item -ItemType Directory -Force -Path (Split-Path -Parent $env:SETTINGS_FILE) | Out-Null" >> "%LOG%" 2>&1
-  copy /y "%STAGED_MANIFEST%" "%LOCAL_MANIFEST%" >> "%LOG%" 2>&1
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "$manifest = Get-Content -LiteralPath $env:LOCAL_MANIFEST -Raw | ConvertFrom-Json; $settingsPath = $env:SETTINGS_FILE; if (Test-Path -LiteralPath $settingsPath) { $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json } else { $settings = [pscustomobject]@{} }; $settings | Add-Member -Force -NotePropertyName version -NotePropertyValue ([string]$manifest.version); if (-not $settings.PSObject.Properties['update']) { $settings | Add-Member -NotePropertyName update -NotePropertyValue ([pscustomobject]@{}) }; $settings.update | Add-Member -Force -NotePropertyName channel -NotePropertyValue ([string]$manifest.channel); $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding UTF8" >> "%LOG%" 2>&1
-  echo [%date% %time%] manifest synced >> "%LOG%"
-) else (
-  echo [%date% %time%] staged manifest missing >> "%LOG%"
-)"""
     return f"""@echo off
 setlocal EnableExtensions
 set "CURRENT={current_exe}"
@@ -301,7 +299,6 @@ set "BACKUP={backup_exe}"
 set "LOG={log_path}"
 set "EXPECTED_SHA={expected_sha256.lower()}"
 set "OLD_PID={old_pid}"
-{manifest_env}
 
 if not exist "%~dp0" mkdir "%~dp0" > nul 2>&1
 if not exist "%LOG%" type nul > "%LOG%"
@@ -354,7 +351,6 @@ if /i not "%ACTUAL_SHA%"=="%EXPECTED_SHA%" (
 echo [%date% %time%] replace verified >> "%LOG%"
 echo [%date% %time%] replace success current=%CURRENT% >> "%LOG%"
 echo [%date% %time%] progress replace completed >> "%LOG%"
-{manifest_sync}
 {restart_line}
 {cleanup_lines}
 echo [%date% %time%] update replace completed >> "%LOG%"
