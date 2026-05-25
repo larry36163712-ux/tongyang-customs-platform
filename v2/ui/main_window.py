@@ -724,6 +724,15 @@ class CustomsErpWindow(QMainWindow):
         )
 
     def _case_status_key(self, case: CaseWorkflow) -> str:
+        state = getattr(case, "workflow_state", "")
+        if state in {"AUDIT_COMPLETED", "READY_FOR_AUDIT"}:
+            return "completed"
+        if state in {"WAITING_BL", "WAITING_DECLARATION", "PARTIAL_WORKFLOW"}:
+            return "missing_docs"
+        if state == "LOW_CONFIDENCE":
+            return "processing"
+        if state == "NEEDS_HUMAN_REVIEW":
+            return "exception"
         if case.status == CaseStatus.COMPLETE:
             return "completed"
         if case.status == CaseStatus.MISSING_DOCUMENTS:
@@ -734,10 +743,10 @@ class CustomsErpWindow(QMainWindow):
 
     def _case_status_label(self, status_key: str) -> str:
         return {
-            "completed": "completed",
-            "missing_docs": "missing docs",
-            "exception": "exception",
-            "processing": "processing",
+            "completed": "ready / completed",
+            "missing_docs": "partial workflow",
+            "exception": "needs human review",
+            "processing": "matching",
         }.get(status_key, status_key)
 
     def _case_status_color(self, status_key: str) -> str:
@@ -785,7 +794,7 @@ class CustomsErpWindow(QMainWindow):
             return case.audit_report.summary
         if case.missing_documents:
             return "不可報\n缺件: " + ", ".join(case.missing_documents)
-        return "尚未產生 AI 核對摘要"
+        return "已建立 workflow，等待 audit summary。"
 
     def _format_case_diff(self, case: CaseWorkflow) -> str:
         colors = {

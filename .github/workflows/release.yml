@@ -164,7 +164,7 @@ jobs:
           git add config\version.json config\v2_settings.json
           $changes = git status --porcelain
           if ($changes) {
-            git commit -m "chore: sync ${{ steps.vars.outputs.channel }} manifest ${{ steps.vars.outputs.version }} [skip ci]"
+            git commit -m "chore: sync ${{ steps.vars.outputs.channel }} manifest ${{ steps.vars.outputs.version }}"
             git push origin HEAD:${{ github.ref_name }}
           } else {
             Write-Host "No manifest changes to commit."
@@ -216,4 +216,3 @@ jobs:
             -VersionPath "dist\version.json" `
             -ShaPath "dist\SHA256.txt" `
             -AssetName $assetName
-

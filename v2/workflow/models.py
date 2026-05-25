@@ -62,6 +62,10 @@ class CaseWorkflow:
     rule_findings: list[str] = field(default_factory=list)
     missing_documents: list[str] = field(default_factory=list)
     workflow_state: str = "PENDING_MATCH"
+    grouping_confidence: str = "pending_review"
+    grouping_score: float = 0.0
+    grouping_reasons: list[str] = field(default_factory=list)
+    unresolved_fields: list[str] = field(default_factory=list)
 
 
 @dataclass

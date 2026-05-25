@@ -56,9 +56,9 @@ class DocumentWorkflowEngine:
         for case in cases:
             self.audit.audit_case(case)
             self.rules.apply(case)
-            self.audit_summary.summarize_case(case)
             confidence = self.confidence.assess_case(case)
             case.workflow_state = self.state_machine.resolve(case, confidence.is_low_confidence).value
+            self.audit_summary.summarize_case(case)
 
         return WorkflowResult(
             direction=direction,

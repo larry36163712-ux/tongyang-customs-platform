@@ -21,12 +21,12 @@ class WorkflowStateMachine:
     """Maps document completeness and audit output into formal workflow states."""
 
     def resolve(self, case: CaseWorkflow, low_confidence: bool = False) -> WorkflowState:
-        if low_confidence:
+        if low_confidence or case.grouping_confidence in {"low_confidence", "pending_review"}:
             return WorkflowState.LOW_CONFIDENCE
         missing = {item.upper() for item in case.missing_documents}
         if "B/L" in missing:
             return WorkflowState.WAITING_BL
-        if {"DS2報單", "出口報單"} & missing:
+        if {"DS2報單", "出口報單", "DS2?勗", "?箏?勗"} & missing:
             return WorkflowState.WAITING_DECLARATION
         if case.missing_documents:
             return WorkflowState.PARTIAL_WORKFLOW
@@ -37,4 +37,3 @@ class WorkflowStateMachine:
         if case.audit_report.status == CheckStatus.MATCH:
             return WorkflowState.READY_FOR_AUDIT
         return WorkflowState.NEEDS_HUMAN_REVIEW
-
