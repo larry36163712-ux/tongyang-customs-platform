@@ -47,7 +47,7 @@ def check_for_updates(current_version: str, update_config: dict, apply_update: b
     if not apply_update:
         return UpdateResult("available", f"發現新版 {latest}。", latest)
 
-    download_url = str(manifest.get("download_url", "")).strip()
+    download_url = str(manifest.get("exe_url") or manifest.get("download_url") or "").strip()
     if not download_url:
         return UpdateResult("error", "發現新版，但 version.json 缺少 download_url。", latest)
 

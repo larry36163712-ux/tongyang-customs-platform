@@ -1,0 +1,63 @@
+name: Cleanup DEV Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_tag:
+        description: "DEV tag to keep, for example v1.1.2-dev"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      keep_tag:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-dev-releases:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cleanup old DEV releases and tags
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $keepTag = "${{ inputs.keep_tag }}"
+          if ($keepTag -notmatch '^v\d+\.\d+\.\d+-dev$') {
+            throw "keep_tag must be a single DEV tag like v1.1.2-dev. Received: $keepTag"
+          }
+
+          $releases = gh release list --repo $repo --limit 200 --json tagName | ConvertFrom-Json
+          foreach ($release in $releases) {
+            $name = [string]$release.tagName
+            $isDevTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
+            if ($isDevTag -and $name -ne $keepTag) {
+              Write-Host "Deleting old DEV release and tag: $name"
+              gh release delete $name --repo $repo --yes --cleanup-tag
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to delete old DEV release: $name"
+              }
+            }
+          }
+
+          $refs = gh api "repos/$repo/git/matching-refs/tags" --jq '.[].ref'
+          foreach ($ref in $refs) {
+            $name = $ref -replace '^refs/tags/', ''
+            $isDevTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
+            if ($isDevTag -and $name -ne $keepTag) {
+              Write-Host "Deleting old DEV tag: $name"
+              gh api --method DELETE "repos/$repo/git/refs/tags/$name" | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to delete old DEV tag: $name"
+              }
+            }
+          }
+

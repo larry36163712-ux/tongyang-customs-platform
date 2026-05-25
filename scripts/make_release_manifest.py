@@ -18,6 +18,8 @@ def main() -> None:
     parser.add_argument("--output", default="version.json")
     parser.add_argument("--channel", default="stable", choices=("stable", "dev"))
     parser.add_argument("--build-time", default="")
+    parser.add_argument("--release-notes", default="")
+    parser.add_argument("--minimum-supported-version", default="")
     args = parser.parse_args()
 
     exe_path = Path(args.exe)
@@ -25,14 +27,20 @@ def main() -> None:
     asset_name = args.asset_name or exe_path.name
     encoded_name = quote(asset_name)
     build_time = args.build_time or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    exe_url = f"https://github.com/{args.repo}/releases/latest/download/{encoded_name}"
+    release_notes = args.release_notes or f"{args.channel.title()} release {args.tag}"
+    minimum_supported_version = args.minimum_supported_version or args.version.lstrip("v")
     manifest = {
         "app_name": "通洋報關平台",
         "version": args.version.lstrip("v"),
-        "download_url": f"https://github.com/{args.repo}/releases/latest/download/{encoded_name}",
-        "sha256": digest,
         "channel": args.channel,
+        "exe_url": exe_url,
+        "download_url": exe_url,
+        "sha256": digest,
         "build_time": build_time,
-        "notes": f"{args.channel.title()} release {args.tag}",
+        "release_notes": release_notes,
+        "notes": release_notes,
+        "minimum_supported_version": minimum_supported_version,
     }
     Path(args.output).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

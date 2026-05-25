@@ -99,13 +99,18 @@ function Assert-ReleaseAssets {
 
     $manifest = Invoke-RestMethod -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"}
     $expectedLatestExeUrl = "https://github.com/$Repo/releases/latest/download/TongYangCustomsPlatform.exe"
-    if ($manifest.download_url -ne $expectedLatestExeUrl) {
-        throw "version.json download_url must use latest URL. manifest=$($manifest.download_url) expected=$expectedLatestExeUrl"
+    $manifestExeUrl = if ($manifest.exe_url) { $manifest.exe_url } else { $manifest.download_url }
+    if ($manifestExeUrl -ne $expectedLatestExeUrl) {
+        throw "version.json exe_url must use latest URL. manifest=$manifestExeUrl expected=$expectedLatestExeUrl"
     }
+    if (-not $manifest.version) { throw "version.json missing version." }
+    if (-not $manifest.channel) { throw "version.json missing channel." }
+    if (-not $manifest.release_notes) { throw "version.json missing release_notes." }
+    if (-not $manifest.minimum_supported_version) { throw "version.json missing minimum_supported_version." }
 
     Invoke-WebRequest -Method Head -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
     Invoke-WebRequest -Method Head -Uri $exeAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
-    Invoke-WebRequest -Method Head -Uri $manifest.download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
+    Invoke-WebRequest -Method Head -Uri $manifestExeUrl -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
 }
 
 function Assert-LatestRelease {

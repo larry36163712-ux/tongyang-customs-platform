@@ -34,16 +34,22 @@ class UpdateManifest:
     channel: str
     notes: str = ""
     build_time: str = ""
+    exe_url: str = ""
+    release_notes: str = ""
+    minimum_supported_version: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
             "app_name": "通洋報關平台",
             "version": self.version,
+            "exe_url": self.exe_url or self.download_url,
             "download_url": self.download_url,
             "sha256": self.sha256,
             "channel": self.channel,
-            "notes": self.notes,
+            "release_notes": self.release_notes or self.notes,
+            "notes": self.notes or self.release_notes,
             "build_time": self.build_time,
+            "minimum_supported_version": self.minimum_supported_version,
         }
 
 
@@ -149,11 +155,14 @@ class V2Updater:
 
         return UpdateManifest(
             version=str(manifest.get("version", "")).strip(),
-            download_url=str(manifest.get("download_url", "")).strip(),
+            download_url=str(manifest.get("exe_url") or manifest.get("download_url") or "").strip(),
             sha256=str(manifest.get("sha256", "")).strip().lower(),
             channel=str(manifest.get("channel", self.settings.channel)).strip() or self.settings.channel,
-            notes=str(manifest.get("notes", "")),
+            notes=str(manifest.get("notes") or manifest.get("release_notes") or ""),
             build_time=str(manifest.get("build_time", "")),
+            exe_url=str(manifest.get("exe_url") or manifest.get("download_url") or "").strip(),
+            release_notes=str(manifest.get("release_notes") or manifest.get("notes") or ""),
+            minimum_supported_version=str(manifest.get("minimum_supported_version", "")),
         )
 
     def _download(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> Path:

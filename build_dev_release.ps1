@@ -156,6 +156,9 @@ Invoke-Step "Sync DEV version files" {
     $manifest.version = $Version
     $manifest.channel = "dev"
     $manifest.notes = "DEV release $tag"
+    $manifest.release_notes = "DEV release $tag"
+    $manifest.minimum_supported_version = $Version
+    $manifest.exe_url = "https://github.com/$Repo/releases/latest/download/$([Uri]::EscapeDataString($assetName))"
     $manifest.download_url = "https://github.com/$Repo/releases/latest/download/$([Uri]::EscapeDataString($assetName))"
     Write-JsonFile $manifest $configVersionPath
 
@@ -193,6 +196,8 @@ Invoke-Step "Generate assets and manifests" {
         --exe $exePath `
         --asset-name $assetName `
         --channel dev `
+        --release-notes "DEV release $tag" `
+        --minimum-supported-version $Version `
         --output $distReleaseManifestPath
 
     $releaseManifest = Read-JsonFile $distReleaseManifestPath
