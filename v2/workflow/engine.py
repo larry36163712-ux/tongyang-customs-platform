@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from engine.workflow import ConfidenceEngine, WorkflowStateMachine
 from v2.audit import AIAuditSummaryEngine, CustomsAuditEngine
 from v2.core.settings import app_base_dir
 from v2.parsers import ParserContext, ParserRegistry, default_parser_registry
@@ -29,6 +30,8 @@ class DocumentWorkflowEngine:
         self.audit = CustomsAuditEngine()
         self.rules = RuleEngine(rules_path or base / "config" / "rules")
         self.audit_summary = AIAuditSummaryEngine()
+        self.confidence = ConfidenceEngine()
+        self.state_machine = WorkflowStateMachine()
 
     def process_paths(self, paths: list[str], direction: str = "import") -> WorkflowResult:
         intake_files = self.intake.load_paths(paths)
@@ -54,6 +57,8 @@ class DocumentWorkflowEngine:
             self.audit.audit_case(case)
             self.rules.apply(case)
             self.audit_summary.summarize_case(case)
+            confidence = self.confidence.assess_case(case)
+            case.workflow_state = self.state_machine.resolve(case, confidence.is_low_confidence).value
 
         return WorkflowResult(
             direction=direction,
@@ -66,5 +71,6 @@ class DocumentWorkflowEngine:
                 "case_count": len(cases),
                 "parser_count": len(self.parsers.parsers),
                 "rule_count": len(self.rules.rules),
+                "workflow_state_machine": "engine.workflow.workflow_state_machine",
             },
         )

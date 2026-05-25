@@ -16,7 +16,7 @@ Do not use generated placeholder names or old executable aliases.
 
 The release manifest must point to the same asset name:
 
-`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/<tag>/TongYangCustomsPlatform.exe`
+`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe`
 
 ## Required Assets
 

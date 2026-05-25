@@ -61,6 +61,7 @@ class CaseWorkflow:
     audit_summary: Any | None = None
     rule_findings: list[str] = field(default_factory=list)
     missing_documents: list[str] = field(default_factory=list)
+    workflow_state: str = "PENDING_MATCH"
 
 
 @dataclass
