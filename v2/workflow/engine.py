@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from v2.audit import CustomsAuditEngine
+from v2.audit import AIAuditSummaryEngine, CustomsAuditEngine
 from v2.core.settings import app_base_dir
 from v2.parsers import ParserContext, ParserRegistry, default_parser_registry
 from v2.rules import RuleEngine
@@ -27,7 +27,8 @@ class DocumentWorkflowEngine:
         self.parsers = parser_registry or default_parser_registry()
         self.matcher = WorkflowMatcher()
         self.audit = CustomsAuditEngine()
-        self.rules = RuleEngine(rules_path or base / "config" / "customs_rules.json")
+        self.rules = RuleEngine(rules_path or base / "config" / "rules")
+        self.audit_summary = AIAuditSummaryEngine()
 
     def process_paths(self, paths: list[str], direction: str = "import") -> WorkflowResult:
         intake_files = self.intake.load_paths(paths)
@@ -52,6 +53,7 @@ class DocumentWorkflowEngine:
         for case in cases:
             self.audit.audit_case(case)
             self.rules.apply(case)
+            self.audit_summary.summarize_case(case)
 
         return WorkflowResult(
             direction=direction,
@@ -63,5 +65,6 @@ class DocumentWorkflowEngine:
                 "segment_count": len(segments),
                 "case_count": len(cases),
                 "parser_count": len(self.parsers.parsers),
+                "rule_count": len(self.rules.rules),
             },
         )

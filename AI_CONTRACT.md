@@ -99,25 +99,24 @@ DEV and STABLE release channels must remain separate.
 
 DEV channel rules:
 
-1. DEV releases must be GitHub prereleases.
-2. DEV releases must use tags formatted as `DEV-x.x.x-dev.x`.
-3. DEV updater logic must not depend on GitHub `/releases/latest`.
-4. Source-mode DEV machines are treated as current and must read local `config/version.json` as the version source.
-5. Packaged DEV clients must read `config/dev_version.json` through raw.githubusercontent.com.
-6. DEV validation may read the tag-specific release API or raw `config/dev_version.json`, but it must not use GitHub latest badge behavior.
-7. DEV updater logic must not read `version.json` from GitHub Release assets.
+1. DEV releases must use the single fixed tag format `vX.X.X-dev`.
+2. DEV releases are normal GitHub releases so `/releases/latest` can point to the current DEV release.
+3. Only one active DEV release may exist at a time.
+4. Every new DEV release must delete old DEV releases and old DEV tags.
+5. DEV updater logic must read `/releases/latest/download/version.json`.
+6. DEV `version.json` must point to `/releases/latest/download/TongYangCustomsPlatform.exe`.
 
 STABLE channel rules:
 
 1. Stable releases must use tags formatted as `vX.X.X`.
-2. Stable releases may be marked as GitHub latest.
+2. Stable releases may keep historical versions.
 3. Stable updater logic may use `/releases/latest/download/version.json`.
-4. Stable update checks must not consume DEV prerelease manifests.
+4. Stable release creation must set its release as GitHub latest.
 
 Release pipeline rules:
 
-1. DEV pipeline creates prereleases and uploads `TongYangCustomsPlatform.exe`, `version.json`, and `SHA256.txt`.
-2. DEV pipeline updates `config/dev_version.json` after every DEV build.
-3. DEV pipeline verifies tag-specific assets and download URLs, not `/releases/latest`.
-4. STABLE pipeline creates normal releases and verifies `/releases/latest`.
-5. GitHub Release asset executable name is always `TongYangCustomsPlatform.exe`.
+1. DEV pipeline creates or updates the single DEV release and uploads `TongYangCustomsPlatform.exe`, `version.json`, and `SHA256.txt`.
+2. DEV pipeline cleans up old DEV releases and old DEV tags.
+3. DEV and STABLE pipelines both verify assets, `version.json`, EXE download URL, and `/releases/latest`.
+4. GitHub Release asset executable name is always `TongYangCustomsPlatform.exe`.
+5. Release lifecycle behavior belongs in the Release Manager layer.

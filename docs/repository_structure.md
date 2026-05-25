@@ -65,7 +65,7 @@ Formal build files:
 
 `build_v2_exe.ps1` builds the V2 PySide6 executable from `v2/main.py`.
 
-`build_dev_release.ps1` coordinates DEV release preparation: version sync, tests, build, manifest/SHA generation, commit/push, prerelease creation, and asset upload.
+`build_dev_release.ps1` coordinates DEV release preparation: version sync, tests, build, manifest/SHA generation, commit/push, release creation/update, cleanup, and asset verification.
 
 The GitHub release executable asset name is always:
 
@@ -84,9 +84,10 @@ This separation avoids GitHub Release asset filename issues without changing UI 
 DEV releases:
 
 - require a `-dev` version
-- are prereleases
-- do not depend on GitHub `/releases/latest`
-- verify tag-specific release assets and download URLs
+- use a single `vX.X.X-dev` tag
+- are normal GitHub releases so `/releases/latest` can point to the current DEV release
+- delete older DEV releases and tags
+- verify `/releases/latest`, `version.json`, and EXE download URLs
 - upload `TongYangCustomsPlatform.exe`, `version.json`, and `SHA256.txt`
 
 Stable releases:

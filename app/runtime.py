@@ -23,8 +23,7 @@ DEFAULT_SETTINGS = """{
   "update": {
     "enabled": true,
     "channel": "dev",
-    "version_url": "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json",
-    "dev_version_url": "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json",
+    "version_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
     "stable_version_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
     "check_on_startup": true
   },

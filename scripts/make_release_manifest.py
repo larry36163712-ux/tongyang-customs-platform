@@ -28,7 +28,7 @@ def main() -> None:
     manifest = {
         "app_name": "通洋報關平台",
         "version": args.version.lstrip("v"),
-        "download_url": f"https://github.com/{args.repo}/releases/download/{args.tag}/{encoded_name}",
+        "download_url": f"https://github.com/{args.repo}/releases/latest/download/{encoded_name}",
         "sha256": digest,
         "channel": args.channel,
         "build_time": build_time,

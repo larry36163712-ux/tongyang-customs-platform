@@ -1,4 +1,6 @@
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $configVersion = Join-Path $PSScriptRoot "config\version.json"
 $configSettings = Join-Path $PSScriptRoot "config\v2_settings.json"

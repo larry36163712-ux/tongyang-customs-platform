@@ -143,10 +143,7 @@ class V2Updater:
         )
 
     def _load_manifest(self) -> UpdateManifest:
-        if self.settings.channel == "dev":
-            manifest_url = self.settings.dev_manifest_url
-        else:
-            manifest_url = self.settings.stable_manifest_url
+        manifest_url = self.settings.stable_manifest_url
         self._log(f"manifest fetch channel={self.settings.channel} url={manifest_url}")
         manifest = _read_json_url(manifest_url)
 

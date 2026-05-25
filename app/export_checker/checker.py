@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
+from pathlib import Path
 
 from app.export_checker.freight_insurance import calculate_tong_ying_vietnam_cfs, parse_decimal
+from app.runtime import app_base_dir
 from app.parser.document import ParsedDocument, UploadedDocument
 from app.shared.checking import (
     compare_ds2_with_documents,
@@ -70,10 +73,12 @@ class ExportChecker:
 
     def _check_freight_insurance(self, values: dict[str, str]) -> list[CheckItem]:
         try:
+            rule_config = self._freight_rule_config()
             expected = calculate_tong_ying_vietnam_cfs(
                 cbm=values.get("cbm", "0"),
                 invoice_amount=values.get("invoice_amount", "0"),
                 insurance_rate=values.get("insurance_rate", "0"),
+                rule_config=rule_config,
             )
             declared_freight = parse_decimal(values.get("declared_freight", "0")).quantize(Decimal("0.01"))
             declared_insurance = parse_decimal(values.get("declared_insurance", "0")).quantize(Decimal("0.01"))
@@ -100,3 +105,16 @@ class ExportChecker:
                     )
                 )
         return items
+
+    def _freight_rule_config(self) -> dict[str, object]:
+        settings_path = app_base_dir() / "config" / "settings.json"
+        if not settings_path.exists():
+            settings_path = Path("config/settings.json")
+        try:
+            data = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return {
+            "freight_rule": data.get("freight_rules", {}).get("tong_ying_export_vietnam_cfs", {}),
+            "insurance_rule": data.get("insurance", {}),
+        }

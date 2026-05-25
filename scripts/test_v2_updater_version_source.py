@@ -114,14 +114,14 @@ def main() -> None:
                 UpdateSettings(
                     enabled=True,
                     channel="dev",
-                    dev_manifest_url="https://raw.githubusercontent.com/example/repo/main/config/dev_version.json",
+                    stable_manifest_url="https://github.com/example/repo/releases/latest/download/version.json",
                 ),
             )
             frozen_dev_remote = updater_module.UpdateManifest("1.0.3", "local", "abc", "dev")
             frozen_dev_updater._load_manifest = lambda: frozen_dev_remote  # type: ignore[method-assign]
             frozen_dev_result = frozen_dev_updater.check()
             if frozen_dev_result.status != "available" or not frozen_dev_result.should_show_popup:
-                raise RuntimeError("frozen dev channel must compare against dev manifest")
+                raise RuntimeError("frozen dev channel must compare against latest manifest")
         finally:
             if original_frozen is None:
                 delattr(sys, "frozen")

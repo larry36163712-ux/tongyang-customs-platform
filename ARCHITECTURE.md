@@ -110,27 +110,58 @@ Business specificity must move downward:
 
 A rule can be promoted to global only when it is documented as universally true for all cases.
 
+## Release Manager Layer
+
+The Release Manager layer owns release lifecycle behavior:
+
+- channel management
+- release create/update
+- asset upload
+- asset verification
+- latest pointer verification
+- DEV release cleanup
+- DEV tag cleanup
+- retention policy
+
+Retention policy:
+
+- DEV keeps only the current `vX.X.X-dev` release and tag.
+- Stable keeps historical `vX.X.X` releases.
+
+DEV release lifecycle:
+
+1. Resolve DEV version to `X.X.X-dev`.
+2. Use the fixed DEV tag `vX.X.X-dev`.
+3. Create or update the release as a normal GitHub release.
+4. Mark the release as GitHub latest.
+5. Upload `TongYangCustomsPlatform.exe`, `version.json`, and `SHA256.txt`.
+6. Delete all older DEV releases and DEV tags.
+7. Verify `/releases/latest` points to the current DEV tag.
+8. Verify `/releases/latest/download/version.json`.
+9. Verify `version.json.download_url` points to `/releases/latest/download/TongYangCustomsPlatform.exe`.
+10. Verify the EXE URL returns a downloadable asset.
+
 ## Updater Architecture
 
-Updater channels are separated by manifest source.
+Updater channels are separated by release channel, but share the same discovery URL:
 
 DEV updater:
 
 1. Source-mode DEV machines do not update themselves and read local `config/version.json`.
-2. Packaged DEV clients fetch `https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json`.
-3. `dev_version.json` contains `version`, `channel`, `download_url`, `sha256`, `build_time`, and optional `notes`.
-4. DEV updater compares local `config/version.json` with raw `config/dev_version.json`.
-5. When remote DEV is newer, it downloads `TongYangCustomsPlatform.exe`, verifies SHA256, schedules temp replacement, and restarts.
-6. DEV updater must not use GitHub `/releases/latest` and must not read `version.json` from GitHub Release assets.
+2. Packaged DEV clients fetch `/releases/latest/download/version.json`.
+3. DEV updater compares local `config/version.json` with the latest manifest.
+4. When remote DEV is newer, it downloads `TongYangCustomsPlatform.exe`, verifies SHA256, schedules temp replacement, and restarts.
+5. DEV updater must not hardcode release tags.
 
 STABLE updater:
 
 1. Stable clients fetch `/releases/latest/download/version.json`.
 2. Stable releases are normal GitHub releases and may be marked latest.
-3. Stable updater must not consume DEV prerelease manifests.
+3. Stable updater must not hardcode release tags.
 
 Release pipeline:
 
-1. DEV build generates `dist/version.json` and syncs the same manifest to `config/dev_version.json`.
-2. DEV build uploads release assets for direct EXE download, but update discovery uses raw `config/dev_version.json`.
-3. STABLE build keeps using GitHub latest release manifest discovery.
+1. DEV build generates `dist/version.json`.
+2. `dist/version.json` uses `/releases/latest/download/TongYangCustomsPlatform.exe`.
+3. DEV build uploads release assets, marks the release latest, and cleans old DEV releases/tags.
+4. STABLE build uploads stable release assets and marks the stable release latest.

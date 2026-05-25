@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "rate_tables": {
+    "company:tong_ying:vietnam:cfs:cbm": {
+      "currency": "TWD",
+      "basis": "cbm",
+      "threshold": 5,
+      "lte_threshold": 6000,
+      "gt_threshold": 8000
+    },
+    "company:tong_ying:insurance_rate": {
+      "multiplier": 1.1,
+      "minimum_premium": 400,
+      "currency": "TWD"
+    }
+  }
+}

@@ -476,6 +476,11 @@ class CustomsErpWindow(QMainWindow):
         compare_table.verticalHeader().setVisible(False)
         compare_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
+        audit_summary = QTextEdit()
+        audit_summary.setReadOnly(True)
+        audit_summary.setObjectName("ResultBox")
+        audit_summary.setMinimumHeight(110)
+
         self.workflow_debug = QTextEdit()
         self.workflow_debug.setReadOnly(True)
         self.workflow_debug.setObjectName("DebugBox")
@@ -486,6 +491,8 @@ class CustomsErpWindow(QMainWindow):
 
         right = QVBoxLayout()
         right.setSpacing(10)
+        right.addWidget(QLabel("AI Audit Summary"))
+        right.addWidget(audit_summary, 1)
         right.addWidget(QLabel("文件 workflow tree"))
         right.addWidget(self.workflow_tree, 2)
         right.addWidget(QLabel("Difference Compare Table"))
@@ -500,6 +507,7 @@ class CustomsErpWindow(QMainWindow):
             "case_list": case_table,
             "tree": self.workflow_tree,
             "table": compare_table,
+            "summary": audit_summary,
             "debug": self.workflow_debug,
             "debug_toggle": debug_toggle,
             "upload": upload_list,
@@ -556,6 +564,7 @@ class CustomsErpWindow(QMainWindow):
         case_list = view.get("case_list")
         tree = view.get("tree")
         table = view.get("table")
+        summary = view.get("summary")
         debug = view.get("debug")
         upload = view.get("upload")
         if isinstance(upload, QListWidget):
@@ -764,8 +773,19 @@ class CustomsErpWindow(QMainWindow):
 
         if isinstance(table, QTableWidget):
             self._populate_compare_table(table, case)
+        if isinstance(summary, QTextEdit):
+            summary.setText(self._format_audit_summary(case))
         if isinstance(debug, QTextEdit):
             debug.setText(self._format_case_debug(case))
+
+    def _format_audit_summary(self, case: CaseWorkflow) -> str:
+        if case.audit_summary:
+            return case.audit_summary.human_text()
+        if case.audit_report:
+            return case.audit_report.summary
+        if case.missing_documents:
+            return "不可報\n缺件: " + ", ".join(case.missing_documents)
+        return "尚未產生 AI 核對摘要"
 
     def _format_case_diff(self, case: CaseWorkflow) -> str:
         colors = {

@@ -3,6 +3,7 @@ __pycache__/
 
 build/
 dist/
+_release_work/
 
 logs/
 parser_cache/
@@ -10,5 +11,6 @@ exports/
 uploads/
 database/
 sync_source/
+pyinstaller_hooks/
 
 *.log

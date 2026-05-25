@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from v2.core.models import DocumentCheckReport, DocumentType, ParsedDocument
 from v2.parsers.base import ParserResult
@@ -57,6 +58,7 @@ class CaseWorkflow:
     documents: list[DocumentSegment] = field(default_factory=list)
     match_keys: dict[str, str] = field(default_factory=dict)
     audit_report: DocumentCheckReport | None = None
+    audit_summary: Any | None = None
     rule_findings: list[str] = field(default_factory=list)
     missing_documents: list[str] = field(default_factory=list)
 

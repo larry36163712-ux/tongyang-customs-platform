@@ -19,10 +19,6 @@ GITHUB_VERSION_URL = (
     "https://github.com/larry36163712-ux/tongyang-customs-platform/"
     "releases/latest/download/version.json"
 )
-GITHUB_DEV_VERSION_URL = (
-    "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/"
-    "main/config/dev_version.json"
-)
 
 
 @dataclass(frozen=True)
@@ -36,11 +32,7 @@ def check_for_updates(current_version: str, update_config: dict, apply_update: b
     if not update_config.get("enabled", True):
         return UpdateResult("disabled", "更新檢查未啟用。")
 
-    channel = str(update_config.get("channel", "stable")).lower()
-    if channel == "dev":
-        version_url = update_config.get("dev_version_url") or update_config.get("version_url") or GITHUB_DEV_VERSION_URL
-    else:
-        version_url = update_config.get("stable_version_url") or update_config.get("version_url") or GITHUB_VERSION_URL
+    version_url = update_config.get("stable_version_url") or update_config.get("version_url") or GITHUB_VERSION_URL
     try:
         manifest = _load_manifest(version_url)
     except Exception:

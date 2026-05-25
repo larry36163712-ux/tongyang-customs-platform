@@ -20,7 +20,7 @@ The release manifest must point to the same asset name:
 
 ## Required Assets
 
-Every DEV prerelease must include:
+Every DEV release must include:
 
 - `TongYangCustomsPlatform.exe`
 - `version.json`
@@ -32,6 +32,10 @@ The upload pipeline must fail if GitHub returns any executable asset name other 
 
 Stable releases are separate from DEV releases.
 
-DEV releases are prereleases and must not depend on GitHub `/releases/latest`. GitHub does not allow prereleases to become the latest release endpoint target. DEV validation must use the tag-specific release API or tag-specific asset URLs.
+DEV keeps exactly one active release: `vX.X.X-dev`. The Release Manager updates that release, marks it as latest, uploads the required assets, and deletes older DEV releases/tags such as `DEV-*` and `vX.X.X-dev.N`.
 
-Stable releases are normal releases, use stable `vX.X.X` tags, and may be marked as GitHub latest.
+Stable releases are normal releases, use stable `vX.X.X` tags, and may keep historical versions.
+
+Updater discovery must use:
+
+`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json`
