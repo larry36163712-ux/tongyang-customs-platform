@@ -437,7 +437,7 @@ class CustomsErpWindow(QMainWindow):
         status_layout.setContentsMargins(12, 8, 12, 8)
         status_layout.setSpacing(8)
         status_steps: list[QLabel] = []
-        for index, step in enumerate(["Upload", "OCR", "Document Split", "Type Detection", "Workflow Match", "Audit", "Completed"]):
+        for index, step in enumerate(["上傳", "讀取", "分類", "組案", "核對", "摘要", "完成"]):
             if index:
                 arrow = QLabel(">")
                 arrow.setObjectName("WorkflowArrow")
@@ -455,7 +455,7 @@ class CustomsErpWindow(QMainWindow):
         case_table = QTableWidget()
         case_table.setObjectName("CaseTable")
         case_table.setColumnCount(8)
-        case_table.setHorizontalHeaderLabels(["狀態", "案件號", "INV NO", "B/L NO", "Booking NO", "文件", "缺件", "最後更新"])
+        case_table.setHorizontalHeaderLabels(["案件狀態", "案件號", "INV NO", "B/L NO", "Booking NO", "文件數", "待處理", "最後更新"])
         case_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         case_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         case_table.verticalHeader().setVisible(False)
@@ -465,13 +465,13 @@ class CustomsErpWindow(QMainWindow):
         case_table.itemSelectionChanged.connect(lambda view=view_name, table=case_table: self._select_workflow_case(table.currentRow(), view))
 
         self.workflow_tree = QTreeWidget()
-        self.workflow_tree.setHeaderLabels(["文件類型", "文件名稱", "Parser confidence", "Page range"])
+        self.workflow_tree.setHeaderLabels(["文件", "狀態", "文件名稱", "頁數"])
         self.workflow_tree.setObjectName("ResultBox")
         self.workflow_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
         compare_table = QTableWidget()
         compare_table.setColumnCount(4)
-        compare_table.setHorizontalHeaderLabels(["欄位", "文件值", "報單值", "狀態"])
+        compare_table.setHorizontalHeaderLabels(["欄位", "文件值", "報單值", "核對結果"])
         compare_table.setObjectName("CompareTable")
         compare_table.verticalHeader().setVisible(False)
         compare_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -485,17 +485,17 @@ class CustomsErpWindow(QMainWindow):
         self.workflow_debug.setReadOnly(True)
         self.workflow_debug.setObjectName("DebugBox")
         self.workflow_debug.hide()
-        debug_toggle = QCheckBox("Parser Debug Panel")
+        debug_toggle = QCheckBox("Debug Panel")
         debug_toggle.setChecked(False)
         debug_toggle.toggled.connect(self.workflow_debug.setVisible)
 
         right = QVBoxLayout()
         right.setSpacing(10)
-        right.addWidget(QLabel("AI Audit Summary"))
+        right.addWidget(QLabel("AI 核對摘要"))
         right.addWidget(audit_summary, 1)
-        right.addWidget(QLabel("文件 workflow tree"))
+        right.addWidget(QLabel("案件文件清單"))
         right.addWidget(self.workflow_tree, 2)
-        right.addWidget(QLabel("Difference Compare Table"))
+        right.addWidget(QLabel("詳細差異區"))
         right.addWidget(compare_table, 2)
         right.addWidget(debug_toggle)
         right.addWidget(self.workflow_debug, 1)
@@ -707,7 +707,7 @@ class CustomsErpWindow(QMainWindow):
             bl_no=keys.get("bl_no", "-"),
             booking_no=keys.get("booking_no") or keys.get("shipping_order_no") or "-",
             document_count=f"{len(case.documents)}份",
-            missing_status="缺少 " + "、".join(case.missing_documents) if case.missing_documents else "完整",
+            missing_status="待補 " + "、".join(case.missing_documents) if case.missing_documents else self._case_action_label(case),
             updated_at=datetime.now().strftime("%H:%M"),
         )
 
@@ -743,11 +743,20 @@ class CustomsErpWindow(QMainWindow):
 
     def _case_status_label(self, status_key: str) -> str:
         return {
-            "completed": "ready / completed",
-            "missing_docs": "partial workflow",
-            "exception": "needs human review",
-            "processing": "matching",
+            "completed": "核對完成",
+            "missing_docs": "待補件",
+            "exception": "需人工確認",
+            "processing": "可核對",
         }.get(status_key, status_key)
+
+    def _case_action_label(self, case: CaseWorkflow) -> str:
+        if getattr(case, "workflow_state", "") in {"READY_FOR_AUDIT", "AUDIT_COMPLETED"}:
+            return "可核對"
+        if getattr(case, "workflow_state", "") == "LOW_CONFIDENCE":
+            return "確認同票"
+        if case.rule_findings:
+            return "確認規則"
+        return "無"
 
     def _case_status_color(self, status_key: str) -> str:
         return {
@@ -773,10 +782,7 @@ class CustomsErpWindow(QMainWindow):
             vm = self._case_view_model(case)
             root = QTreeWidgetItem([vm.case_id, vm.status, "", ""])
             tree.addTopLevelItem(root)
-            for segment in case.documents:
-                doc = self._document_view_model(segment)
-                item = QTreeWidgetItem([doc.document_type, doc.document_name, doc.parser_confidence, doc.page_range])
-                item.setToolTip(2, doc.parser_name)
+            for item in self._document_checklist_items(case):
                 root.addChild(item)
             root.setExpanded(True)
 
@@ -795,6 +801,31 @@ class CustomsErpWindow(QMainWindow):
         if case.missing_documents:
             return "不可報\n缺件: " + ", ".join(case.missing_documents)
         return "已建立 workflow，等待 audit summary。"
+
+    def _document_checklist_items(self, case: CaseWorkflow) -> list[QTreeWidgetItem]:
+        present = {
+            (segment.parsed.document_type if segment.parsed else segment.detected_type).value: segment
+            for segment in case.documents
+        }
+        required = ["DS2報單", "INV", "PKG", "B/L"] if case.direction != "export" else ["出口報單", "INV", "PKG", "BOOKING", "B/L"]
+        items: list[QTreeWidgetItem] = []
+        for document_type in required:
+            segment = present.get(document_type)
+            if segment:
+                item = QTreeWidgetItem([document_type, "✓ 已收到", segment.source_name, f"{segment.page_start}-{segment.page_end}"])
+                item.setToolTip(1, "文件已納入本案核對")
+            else:
+                item = QTreeWidgetItem([document_type, "✗ 待補", "-", "-"])
+                item.setToolTip(1, "缺少此文件，需補件後才能完整核對")
+            items.append(item)
+        extra_segments = [
+            segment for segment in case.documents
+            if (segment.parsed.document_type if segment.parsed else segment.detected_type).value not in required
+        ]
+        for segment in extra_segments:
+            document_type = (segment.parsed.document_type if segment.parsed else segment.detected_type).value
+            items.append(QTreeWidgetItem([document_type, "✓ 已收到", segment.source_name, f"{segment.page_start}-{segment.page_end}"]))
+        return items
 
     def _format_case_diff(self, case: CaseWorkflow) -> str:
         colors = {
@@ -827,11 +858,11 @@ class CustomsErpWindow(QMainWindow):
         if not results:
             fallback_rows = []
             if case.missing_documents:
-                fallback_rows.extend(("缺件", missing, "-", "可疑") for missing in case.missing_documents)
+                fallback_rows.extend(("缺少文件", missing, "-", "待補件") for missing in case.missing_documents)
             if case.rule_findings:
-                fallback_rows.extend(("規則提醒", finding, "-", "可疑") for finding in case.rule_findings)
+                fallback_rows.extend(("規則提醒", finding, "-", "需確認") for finding in case.rule_findings)
             if not fallback_rows:
-                fallback_rows.append(("核對", "目前文件未產生可比對欄位", "-", "可疑"))
+                fallback_rows.append(("核對", "目前文件不足，尚不可比對欄位", "-", "待補件"))
             table.setRowCount(len(fallback_rows))
             for row, cells in enumerate(fallback_rows):
                 for col, value in enumerate(cells):
@@ -849,10 +880,10 @@ class CustomsErpWindow(QMainWindow):
             CheckStatus.HIGH_RISK: "#5A2A2A",
         }
         label_by_status = {
-            CheckStatus.MATCH: "正常",
-            CheckStatus.MISSING: "可疑",
-            CheckStatus.MISMATCH: "錯誤",
-            CheckStatus.HIGH_RISK: "錯誤",
+            CheckStatus.MATCH: "一致",
+            CheckStatus.MISSING: "無法確認",
+            CheckStatus.MISMATCH: "不一致",
+            CheckStatus.HIGH_RISK: "高風險",
         }
         for row, result in enumerate(results):
             values = " | ".join(f"{name}: {value}" for name, value in result.document_values.items()) or "-"

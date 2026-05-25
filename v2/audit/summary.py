@@ -24,29 +24,42 @@ class AuditSummary:
     next_actions: list[str] = field(default_factory=list)
 
     def human_text(self) -> str:
-        lines = [
-            f"案件 {self.case_id}: {self.headline}",
-            f"workflow state: {self.workflow_state}",
-            f"grouping confidence: {self.grouping_confidence}",
-            f"是否可報: {'可報' if self.can_declare else '不可報'}",
-        ]
+        lines = ["【核對摘要】", f"案件 {self.case_id}: {self.headline}"]
+        lines.append(f"案件狀態: {self._human_status()}")
         if self.found_documents:
             lines.append("已找到文件: " + ", ".join(self.found_documents))
         if self.missing_documents:
-            lines.append("缺件: " + ", ".join(self.missing_documents))
-        if self.differences:
-            lines.append("差異: " + " | ".join(self.differences))
+            lines.append("缺少文件: " + ", ".join(self.missing_documents))
+        matched = self._matched_items()
+        if matched:
+            lines.append("已確認一致項目: " + ", ".join(matched))
         if self.high_risk_fields:
-            lines.append("高風險: " + " | ".join(self.high_risk_fields))
+            lines.append("風險: " + " | ".join(self.high_risk_fields[:6]))
+        if self.differences:
+            lines.append("異常欄位: " + " | ".join(self.differences[:8]))
         if self.unresolved_fields:
-            lines.append("無法確認欄位: " + ", ".join(self.unresolved_fields))
-        if self.grouping_reasons:
-            lines.append("grouping reason: " + " | ".join(self.grouping_reasons))
+            lines.append("無法確認項目: " + ", ".join(self.unresolved_fields))
         if self.rule_warnings:
-            lines.append("規則提醒: " + " | ".join(self.rule_warnings))
+            lines.append("規則提醒: " + " | ".join(self.rule_warnings[:4]))
         if self.next_actions:
-            lines.append("下一步: " + " | ".join(self.next_actions))
+            lines.append("建議下一步: " + " | ".join(self.next_actions))
         return "\n".join(lines)
+
+    def _human_status(self) -> str:
+        if self.can_declare:
+            return "可核對"
+        if self.workflow_state in {"WAITING_BL", "WAITING_DECLARATION", "PARTIAL_WORKFLOW"}:
+            return "待補件"
+        if self.workflow_state == "AUDIT_COMPLETED":
+            return "核對完成"
+        return "需人工確認"
+
+    def _matched_items(self) -> list[str]:
+        if self.missing_documents or self.differences or self.high_risk_fields:
+            return []
+        if self.found_documents:
+            return ["必要文件已建立關聯", "目前未發現差異"]
+        return []
 
 
 class AIAuditSummaryEngine:
