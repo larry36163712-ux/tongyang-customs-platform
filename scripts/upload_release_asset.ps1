@@ -51,7 +51,7 @@ if ($Path.ToLowerInvariant().EndsWith(".exe") -and (Split-Path -Leaf $uploadPath
 }
 
 $builder = [System.UriBuilder]::new("https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets")
-$builder.Query = "name=$AssetName"
+$builder.Query = "name=$([Uri]::EscapeDataString($AssetName))"
 $uploaded = Invoke-RestMethod `
     -Method Post `
     -Uri $builder.Uri `
