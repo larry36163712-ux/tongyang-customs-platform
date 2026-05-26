@@ -15,17 +15,27 @@ on:
         options:
           - dev
           - stable
-      use_existing_dist:
-        description: "Use existing dist assets when present; build only if assets are missing"
-        required: true
-        default: true
-        type: boolean
   push:
     branches:
       - main
+    paths:
+      - "app/**"
+      - "v2/**"
+      - "engine/**"
+      - "config/**"
+      - "scripts/**"
+      - "templates/**"
+      - "AI_Customs_ERP_V2.spec"
+      - "build_v2_exe.ps1"
+      - ".github/workflows/release.yml"
 
 permissions:
   contents: write
+  actions: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -44,12 +54,10 @@ jobs:
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $version = "${{ inputs.version }}"
             $channel = "${{ inputs.channel }}"
-            $useExistingDist = "${{ inputs.use_existing_dist }}"
           } else {
             $manifest = Get-Content "config\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
             $version = "$($manifest.version)" -replace "-dev\.\d+$", "-dev"
-            $channel = "dev"
-            $useExistingDist = "true"
+            $channel = if ($version -match "-dev$") { "dev" } else { "stable" }
           }
 
           if ($channel -eq "dev") {
@@ -63,7 +71,6 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "channel=$channel" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
-          "use_existing_dist=$useExistingDist" >> $env:GITHUB_OUTPUT
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -80,52 +87,14 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
-          python -m py_compile v2\ui\main_window.py v2\core\updater.py app\updater.py scripts\make_release_manifest.py
+          python -m py_compile v2\ui\main_window.py v2\core\updater.py v2\core\settings.py scripts\make_release_manifest.py
           python scripts\test_v2_document_workflow.py
           python scripts\test_v2_declaration_workflow.py
           python scripts\test_v2_updater_version_source.py
 
-      - name: Sync version files
+      - name: Build EXE
         shell: pwsh
-        run: |
-          $repo = "${{ github.repository }}"
-          $version = "${{ steps.vars.outputs.version }}"
-          $tag = "${{ steps.vars.outputs.tag }}"
-          $channel = "${{ steps.vars.outputs.channel }}"
-          $assetName = "TongYangCustomsPlatform.exe"
-          $exeUrl = "https://github.com/$repo/releases/latest/download/$assetName"
-          $manifest = Get-Content "config\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-          $manifest.version = $version
-          $manifest.channel = $channel
-          $manifest.exe_url = $exeUrl
-          $manifest.download_url = $exeUrl
-          $manifest.release_notes = "$($channel.ToUpper()) release $tag"
-          $manifest.notes = $manifest.release_notes
-          $manifest.minimum_supported_version = $version
-          $manifest | ConvertTo-Json -Depth 30 | Set-Content "config\version.json" -Encoding UTF8
-
-          if (Test-Path "config\v2_settings.json") {
-            $settings = Get-Content "config\v2_settings.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-            $settings.update.channel = $channel
-            $settings.update.stable_manifest_url = "https://github.com/$repo/releases/latest/download/version.json"
-            $settings.update.stable_download_url = $exeUrl
-            $settings | ConvertTo-Json -Depth 30 | Set-Content "config\v2_settings.json" -Encoding UTF8
-          }
-
-      - name: Build EXE when needed
-        shell: pwsh
-        run: |
-          $localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-          $exePath = Join-Path "dist" $localExeName
-          $useExistingDist = "${{ steps.vars.outputs.use_existing_dist }}"
-          if ($useExistingDist -eq "true" -and (Test-Path -LiteralPath $exePath)) {
-            Write-Host "Using existing dist asset: $exePath"
-          } else {
-            .\build_v2_exe.ps1
-          }
-          if (-not (Test-Path -LiteralPath $exePath)) {
-            throw "Expected EXE not found after build step: $exePath"
-          }
+        run: .\build_v2_exe.ps1
 
       - name: Generate release assets
         shell: pwsh
@@ -138,6 +107,10 @@ jobs:
           $localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
           $exePath = Join-Path "dist" $localExeName
 
+          if (-not (Test-Path -LiteralPath $exePath)) {
+            throw "Expected EXE not found: $exePath"
+          }
+
           python scripts/make_release_manifest.py `
             --repo $repo `
             --tag $tag `
@@ -149,22 +122,57 @@ jobs:
             --minimum-supported-version $version `
             --output "dist\version.json"
 
+          $manifest = Get-Content "dist\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($channel -eq "dev") {
+            $tagExeUrl = "https://github.com/$repo/releases/download/$tag/$assetName"
+            $manifest.exe_url = $tagExeUrl
+            $manifest.download_url = $tagExeUrl
+          } else {
+            $latestExeUrl = "https://github.com/$repo/releases/latest/download/$assetName"
+            $manifest.exe_url = $latestExeUrl
+            $manifest.download_url = $latestExeUrl
+          }
+          $manifest | ConvertTo-Json -Depth 30 | Set-Content "dist\version.json" -Encoding UTF8
+
           New-Item -ItemType Directory -Force -Path "dist\config" | Out-Null
           Copy-Item -LiteralPath "dist\version.json" -Destination "dist\config\version.json" -Force
           Copy-Item -LiteralPath "dist\version.json" -Destination "config\version.json" -Force
+          if ($channel -eq "dev") {
+            Copy-Item -LiteralPath "dist\version.json" -Destination "config\dev_version.json" -Force
+          }
+
+          if (Test-Path "config\v2_settings.json") {
+            $settings = Get-Content "config\v2_settings.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+            $settings.update.channel = $channel
+            $settings.update.stable_manifest_url = "https://github.com/$repo/releases/latest/download/version.json"
+            $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
+            $settings | ConvertTo-Json -Depth 30 | Set-Content "config\v2_settings.json" -Encoding UTF8
+          }
+
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
           [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $assetName`n", [Text.UTF8Encoding]::new($false))
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-customs-erp-${{ steps.vars.outputs.channel }}-${{ steps.vars.outputs.version }}
+          path: |
+            dist/*.exe
+            dist/version.json
+            dist/SHA256.txt
+            dist/config/version.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Commit manifest updates
-        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add config\version.json config\v2_settings.json
+          git add config\version.json config\v2_settings.json config\dev_version.json
           $changes = git status --porcelain
           if ($changes) {
-            git commit -m "chore: sync ${{ steps.vars.outputs.channel }} manifest ${{ steps.vars.outputs.version }}"
+            git commit -m "chore: sync ${{ steps.vars.outputs.channel }} release manifest ${{ steps.vars.outputs.version }}"
             git push origin HEAD:${{ github.ref_name }}
           } else {
             Write-Host "No manifest changes to commit."
@@ -185,9 +193,8 @@ jobs:
           - Channel: $channel
           - Build time: $buildTime
           - Git commit: $commit
-          - Completed modules: release manager, updater manifest, workflow engine boundary
-          - Parser coverage: semantic-core, booking-so-parser, import DS2/INV/PKG/B/L workflow, export booking/S/O workflow
-          - Compare coverage: declaration/document field compare, booking/export field compare, missing document status
+          - Assets: TongYangCustomsPlatform.exe, version.json, SHA256.txt
+          - Release lifecycle: build, manifest generation, SHA256 generation, upload, verify, cleanup
           "@ | Set-Content "dist\release-notes.md" -Encoding UTF8
 
       - name: Create or update GitHub Release
@@ -204,7 +211,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f $tag "${{ github.sha }}"
+          git tag -f $tag HEAD
           git push origin -f $tag
 
           .\scripts\release_manager.ps1 `
@@ -216,3 +223,29 @@ jobs:
             -VersionPath "dist\version.json" `
             -ShaPath "dist\SHA256.txt" `
             -AssetName $assetName
+
+      - name: Verify published URLs
+        shell: pwsh
+        run: |
+          $repo = "${{ github.repository }}"
+          $tag = "${{ steps.vars.outputs.tag }}"
+          $channel = "${{ steps.vars.outputs.channel }}"
+          if ($channel -eq "stable") {
+            $manifestUrl = "https://github.com/$repo/releases/latest/download/version.json"
+            $exeUrl = "https://github.com/$repo/releases/latest/download/TongYangCustomsPlatform.exe"
+          } else {
+            $manifestUrl = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
+            $exeUrl = "https://github.com/$repo/releases/download/$tag/TongYangCustomsPlatform.exe"
+          }
+
+          $manifestResponse = Invoke-WebRequest -Method Get -Uri $manifestUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
+          if ($manifestResponse.StatusCode -ne 200) { throw "Manifest HTTP status was $($manifestResponse.StatusCode)" }
+          $manifest = $manifestResponse.Content | ConvertFrom-Json
+          foreach ($field in @("version", "channel", "exe_url", "release_notes", "minimum_supported_version", "sha256")) {
+            if (-not $manifest.$field) { throw "version manifest missing field: $field" }
+          }
+
+          $exeResponse = Invoke-WebRequest -Method Head -Uri $exeUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
+          if ($exeResponse.StatusCode -lt 200 -or $exeResponse.StatusCode -ge 400) {
+            throw "EXE HTTP status was $($exeResponse.StatusCode)"
+          }

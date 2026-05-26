@@ -1,63 +1,90 @@
-name: Cleanup DEV Releases
+name: Cleanup Releases And Artifacts
 
 on:
   workflow_dispatch:
     inputs:
-      keep_tag:
-        description: "DEV tag to keep, for example v1.1.2-dev"
-        required: true
+      keep_dev_tag:
+        description: "Optional DEV tag to keep, for example v1.1.5-dev. Empty means newest DEV release."
+        required: false
+        default: ""
         type: string
   workflow_call:
     inputs:
-      keep_tag:
-        required: true
+      keep_dev_tag:
+        required: false
         type: string
+        default: ""
+  schedule:
+    - cron: "20 18 * * *"
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
-  cleanup-dev-releases:
+  cleanup:
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cleanup old DEV releases and tags
+      - name: Cleanup old releases, tags, and artifacts
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $repo = "${{ github.repository }}"
-          $keepTag = "${{ inputs.keep_tag }}"
-          if ($keepTag -notmatch '^v\d+\.\d+\.\d+-dev$') {
-            throw "keep_tag must be a single DEV tag like v1.1.2-dev. Received: $keepTag"
+          $keepDevTag = "${{ inputs.keep_dev_tag }}"
+
+          $releases = @(gh release list --repo $repo --limit 200 --json tagName,publishedAt,isPrerelease | ConvertFrom-Json)
+          $devReleases = @($releases | Where-Object {
+            ([string]$_.tagName) -match '^DEV-' -or ([string]$_.tagName) -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
+          } | Sort-Object publishedAt -Descending)
+          if (-not $keepDevTag -and $devReleases.Count -gt 0) {
+            $keepDevTag = [string]$devReleases[0].tagName
           }
 
-          $releases = gh release list --repo $repo --limit 200 --json tagName | ConvertFrom-Json
-          foreach ($release in $releases) {
+          foreach ($release in $devReleases) {
             $name = [string]$release.tagName
-            $isDevTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
-            if ($isDevTag -and $name -ne $keepTag) {
+            if ($name -ne $keepDevTag) {
               Write-Host "Deleting old DEV release and tag: $name"
               gh release delete $name --repo $repo --yes --cleanup-tag
-              if ($LASTEXITCODE -ne 0) {
-                throw "Failed to delete old DEV release: $name"
-              }
+              if ($LASTEXITCODE -ne 0) { throw "Failed to delete old DEV release: $name" }
+            }
+          }
+
+          $stableReleases = @($releases | Where-Object {
+            ([string]$_.tagName) -match '^v\d+\.\d+\.\d+$' -and -not $_.isPrerelease
+          } | Sort-Object publishedAt -Descending)
+          $stableKeep = @($stableReleases | Select-Object -First 3 | ForEach-Object { [string]$_.tagName })
+          foreach ($release in $stableReleases) {
+            $name = [string]$release.tagName
+            if ($stableKeep -notcontains $name) {
+              Write-Host "Deleting old stable release and tag: $name"
+              gh release delete $name --repo $repo --yes --cleanup-tag
+              if ($LASTEXITCODE -ne 0) { throw "Failed to delete old stable release: $name" }
             }
           }
 
           $refs = gh api "repos/$repo/git/matching-refs/tags" --jq '.[].ref'
+          $releaseTags = @($releases | ForEach-Object { [string]$_.tagName })
           foreach ($ref in $refs) {
             $name = $ref -replace '^refs/tags/', ''
-            $isDevTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
-            if ($isDevTag -and $name -ne $keepTag) {
-              Write-Host "Deleting old DEV tag: $name"
+            $isManagedTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+(-dev(\.\d+)?)?$'
+            if ($isManagedTag -and $releaseTags -notcontains $name) {
+              Write-Host "Deleting orphan tag: $name"
               gh api --method DELETE "repos/$repo/git/refs/tags/$name" | Out-Null
-              if ($LASTEXITCODE -ne 0) {
-                throw "Failed to delete old DEV tag: $name"
-              }
+              if ($LASTEXITCODE -ne 0) { throw "Failed to delete orphan tag: $name" }
             }
           }
 
+          $cutoff = (Get-Date).ToUniversalTime().AddDays(-7)
+          $artifacts = gh api "repos/$repo/actions/artifacts?per_page=100" --paginate | ConvertFrom-Json
+          foreach ($artifact in $artifacts.artifacts) {
+            $created = [DateTime]::Parse([string]$artifact.created_at).ToUniversalTime()
+            if ($created -lt $cutoff) {
+              Write-Host "Deleting old artifact: $($artifact.name)"
+              gh api --method DELETE "repos/$repo/actions/artifacts/$($artifact.id)" | Out-Null
+            }
+          }

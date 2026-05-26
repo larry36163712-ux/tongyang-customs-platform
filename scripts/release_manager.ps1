@@ -76,6 +76,39 @@ function Remove-OldDevReleases {
     }
 }
 
+function Remove-OldStableReleases {
+    param([string]$KeepTag, [int]$KeepCount = 3)
+
+    if ($Channel -ne "stable") {
+        return
+    }
+
+    $releases = & gh release list --repo $Repo --limit 200 --json tagName,publishedAt,isPrerelease
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to list releases for stable cleanup."
+    }
+
+    $stableReleases = @($releases | ConvertFrom-Json | Where-Object {
+        ([string]$_.tagName) -match '^v\d+\.\d+\.\d+$' -and -not $_.isPrerelease
+    } | Sort-Object publishedAt -Descending)
+
+    $keep = @($stableReleases | Select-Object -First $KeepCount | ForEach-Object { [string]$_.tagName })
+    if ($keep -notcontains $KeepTag) {
+        $keep += $KeepTag
+    }
+
+    foreach ($release in $stableReleases) {
+        $name = [string]$release.tagName
+        if ($keep -notcontains $name) {
+            Write-Host "Deleting old stable release and tag: $name"
+            & gh release delete $name --repo $Repo --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to delete old stable release: $name"
+            }
+        }
+    }
+}
+
 function Assert-ReleaseAssets {
     param([string]$ReleaseTag)
 
@@ -98,7 +131,11 @@ function Assert-ReleaseAssets {
     }
 
     $manifest = Invoke-RestMethod -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"}
-    $expectedLatestExeUrl = "https://github.com/$Repo/releases/latest/download/TongYangCustomsPlatform.exe"
+    $expectedLatestExeUrl = if ($Channel -eq "stable") {
+        "https://github.com/$Repo/releases/latest/download/TongYangCustomsPlatform.exe"
+    } else {
+        "https://github.com/$Repo/releases/download/$ReleaseTag/TongYangCustomsPlatform.exe"
+    }
     $manifestExeUrl = if ($manifest.exe_url) { $manifest.exe_url } else { $manifest.download_url }
     if ($manifestExeUrl -ne $expectedLatestExeUrl) {
         throw "version.json exe_url must use latest URL. manifest=$manifestExeUrl expected=$expectedLatestExeUrl"
@@ -124,9 +161,24 @@ function Assert-LatestRelease {
 
 $release = Get-ReleaseByTag $Tag
 if ($release) {
-    Invoke-Gh release edit $Tag --repo $Repo --title $Tag --notes-file $NotesPath --latest
+    Invoke-Gh release edit $Tag --repo $Repo --title $Tag --notes-file $NotesPath
 } else {
-    Invoke-Gh release create $Tag --repo $Repo --title $Tag --notes-file $NotesPath --latest
+    if ($Channel -eq "dev") {
+        Invoke-Gh release create $Tag --repo $Repo --title $Tag --notes-file $NotesPath --prerelease
+    } else {
+        Invoke-Gh release create $Tag --repo $Repo --title $Tag --notes-file $NotesPath --latest
+    }
+    $release = Get-ReleaseByTag $Tag
+}
+
+if (-not $release) {
+    throw "Release was not created or found: $Tag"
+}
+
+if ($Channel -eq "dev") {
+    Invoke-Gh api --method PATCH "repos/$Repo/releases/$($release.databaseId)" -F prerelease=true -F make_latest=false
+} else {
+    Invoke-Gh api --method PATCH "repos/$Repo/releases/$($release.databaseId)" -F prerelease=false -F make_latest=true
 }
 
 .\scripts\upload_release_asset.ps1 `
@@ -139,8 +191,11 @@ if ($release) {
 Invoke-Gh release upload $Tag $ShaPath $VersionPath --repo $Repo --clobber
 
 Remove-OldDevReleases -KeepTag $Tag
+Remove-OldStableReleases -KeepTag $Tag -KeepCount 3
 Assert-ReleaseAssets -ReleaseTag $Tag
-Assert-LatestRelease -ReleaseTag $Tag
+if ($Channel -eq "stable") {
+    Assert-LatestRelease -ReleaseTag $Tag
+}
 
 Write-Host "Release manager completed."
 Write-Host "Channel: $Channel"

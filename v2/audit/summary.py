@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from v2.core.models import CheckStatus, DocumentCheckReport
+from v2.core.models import CheckResult, CheckStatus, DocumentCheckReport, DocumentType
 from v2.workflow.models import CaseWorkflow
 
 
@@ -22,27 +22,39 @@ class AuditSummary:
     grouping_reasons: list[str] = field(default_factory=list)
     rule_warnings: list[str] = field(default_factory=list)
     next_actions: list[str] = field(default_factory=list)
+    matched_fields: list[str] = field(default_factory=list)
 
     def human_text(self) -> str:
-        lines = ["【核對摘要】", f"案件 {self.case_id}: {self.headline}"]
-        lines.append(f"案件狀態: {self._human_status()}")
+        lines = ["【文件狀態】"]
         if self.found_documents:
-            lines.append("已找到文件: " + ", ".join(self.found_documents))
-        if self.missing_documents:
-            lines.append("缺少文件: " + ", ".join(self.missing_documents))
-        matched = self._matched_items()
-        if matched:
-            lines.append("已確認一致項目: " + ", ".join(matched))
-        if self.high_risk_fields:
-            lines.append("風險: " + " | ".join(self.high_risk_fields[:6]))
-        if self.differences:
-            lines.append("異常欄位: " + " | ".join(self.differences[:8]))
+            lines.extend(f"✓ {name}" for name in self.found_documents[:10])
+        else:
+            lines.append("⚠ 尚未辨識到可核對文件")
+        lines.extend(f"✗ {name}" for name in self.missing_documents)
+
+        lines.append("")
+        lines.append("【欄位核對】")
+        if self.matched_fields:
+            lines.extend(f"✓ {field} 一致" for field in self.matched_fields[:8])
+        if not self.matched_fields and not self.differences and not self.high_risk_fields and not self.unresolved_fields:
+            lines.append("⚠ 尚未產生欄位核對結果")
         if self.unresolved_fields:
-            lines.append("無法確認項目: " + ", ".join(self.unresolved_fields))
+            lines.extend(f"⚠ {field} 無法確認" for field in self.unresolved_fields[:8])
+        if self.differences:
+            lines.extend(f"✗ {item}" for item in self.differences[:8])
+        if self.high_risk_fields:
+            lines.extend(f"⚠ {item}" for item in self.high_risk_fields[:6])
+
+        problems = [f"缺少 {name}" for name in self.missing_documents]
+        problems.extend(self.differences[:8])
+        problems.extend(f"無法確認 {field}" for field in self.unresolved_fields[:8])
+        problems.extend(self.high_risk_fields[:6])
         if self.rule_warnings:
-            lines.append("規則提醒: " + " | ".join(self.rule_warnings[:4]))
-        if self.next_actions:
-            lines.append("建議下一步: " + " | ".join(self.next_actions))
+            problems.extend(self.rule_warnings[:4])
+        if problems:
+            lines.append("")
+            lines.append("【問題】")
+            lines.extend(f"{index}. {problem}" for index, problem in enumerate(problems, 1))
         return "\n".join(lines)
 
     def _human_status(self) -> str:
@@ -69,6 +81,7 @@ class AIAuditSummaryEngine:
         report = case.audit_report
         found_documents = self._found_documents(case)
         missing_documents = list(case.missing_documents)
+        matched_fields = self._matched_fields(report)
         differences = self._differences(report)
         high_risk = self._high_risk(report)
         unresolved_fields = list(case.unresolved_fields)
@@ -97,6 +110,7 @@ class AIAuditSummaryEngine:
             grouping_reasons=list(case.grouping_reasons),
             rule_warnings=rule_warnings,
             next_actions=next_actions,
+            matched_fields=matched_fields,
         )
         case.audit_summary = summary
         return summary
@@ -104,18 +118,72 @@ class AIAuditSummaryEngine:
     def _found_documents(self, case: CaseWorkflow) -> list[str]:
         found: list[str] = []
         for segment in case.documents:
-            document_type = segment.parsed.document_type.value if segment.parsed else segment.detected_type.value
-            found.append(f"{document_type}({segment.source_name}, p.{segment.page_start}-{segment.page_end})")
-        return found
+            document_type = segment.parsed.document_type if segment.parsed else segment.detected_type
+            found.append(self._document_label(document_type))
+        return sorted(set(found))
+
+    def _document_label(self, document_type: DocumentType) -> str:
+        return {
+            DocumentType.DS2_DECLARATION: "DS2 報單",
+            DocumentType.INVOICE: "INV",
+            DocumentType.PACKING_LIST: "PL / PKG",
+            DocumentType.BILL_OF_LADING: "B/L",
+            DocumentType.ARRIVAL_NOTICE: "到貨通知",
+            DocumentType.CLEARANCE_LIST: "清表",
+            DocumentType.DATA_CLEARANCE: "資料清表",
+            DocumentType.MATERIAL_CLEARANCE: "用料清表",
+            DocumentType.DRAWBACK_CLEARANCE: "核退清表",
+            DocumentType.BOOKING: "BOOKING",
+            DocumentType.SHIPPING_ORDER: "S/O",
+            DocumentType.BOOKING_CONFIRMATION: "BOOKING CONFIRMATION",
+            DocumentType.EXPORT_DECLARATION: "出口報單",
+            DocumentType.PACKING_DETAIL: "裝箱明細",
+        }.get(document_type, document_type.value)
 
     def _differences(self, report: DocumentCheckReport | None) -> list[str]:
         if not report:
-            return ["尚未完成欄位核對"]
+            return []
         return [
-            result.message
+            self._format_problem(result)
             for result in report.results
             if result.status in {CheckStatus.MISMATCH, CheckStatus.MISSING}
         ]
+
+    def _matched_fields(self, report: DocumentCheckReport | None) -> list[str]:
+        if not report:
+            return []
+        return [
+            self._field_label(result.field.value)
+            for result in report.results
+            if result.status == CheckStatus.MATCH
+        ]
+
+    def _format_problem(self, result: CheckResult) -> str:
+        label = self._field_label(result.field.value)
+        if result.status == CheckStatus.MISSING:
+            return f"{label} 無法確認"
+        return result.message or f"{label} 不一致"
+
+    def _field_label(self, field_name: str) -> str:
+        return {
+            "quantity": "數量",
+            "package_count": "件數",
+            "unit": "單位",
+            "item_no": "項次",
+            "description": "品名",
+            "gross_weight": "毛重",
+            "net_weight": "淨重",
+            "amount": "金額",
+            "currency": "幣別",
+            "hs_code": "稅則",
+            "port": "港口",
+            "container_no": "櫃號",
+            "seal_no": "封條",
+            "vessel_voyage": "船名航次",
+            "origin": "產地",
+            "customer": "客戶",
+            "supplier": "供應商",
+        }.get(field_name, field_name)
 
     def _high_risk(self, report: DocumentCheckReport | None) -> list[str]:
         if not report:

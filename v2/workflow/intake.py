@@ -47,6 +47,8 @@ class FileIntakeEngine:
             pages = [IntakePage(1, self._load_xlsx(path))]
         elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
             result = self.ocr.extract_image_text(path)
+            if not result.available or not result.text.strip():
+                raise RuntimeError(f"OCR failed for {path.name}: {result.message or 'no text extracted'}")
             pages = [IntakePage(1, result.text, True, result.message)]
         else:
             pages = [IntakePage(1, self._load_text(path))]
@@ -65,6 +67,10 @@ class FileIntakeEngine:
             ocr_message = ""
             if not text.strip():
                 result = self.ocr.extract_pdf_page_text(path, index - 1)
+                if not result.available or not result.text.strip():
+                    raise RuntimeError(
+                        f"OCR failed for {path.name} page {index}: {result.message or 'no text extracted'}"
+                    )
                 text = result.text
                 ocr_used = result.available
                 ocr_message = result.message

@@ -90,4 +90,4 @@ jobs:
             dist/SHA256.txt
             dist/config/version.json
           if-no-files-found: error
-
+          retention-days: 7

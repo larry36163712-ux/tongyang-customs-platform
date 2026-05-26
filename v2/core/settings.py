@@ -15,6 +15,9 @@ class UpdateSettings:
     stable_manifest_url: str = (
         "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json"
     )
+    dev_manifest_url: str = (
+        "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json"
+    )
 
 
 @dataclass
@@ -103,6 +106,12 @@ def load_settings() -> V2Settings:
                 update_data.get(
                     "stable_manifest_url",
                     UpdateSettings.stable_manifest_url,
+                )
+            ),
+            dev_manifest_url=str(
+                update_data.get(
+                    "dev_manifest_url",
+                    UpdateSettings.dev_manifest_url,
                 )
             ),
         ),

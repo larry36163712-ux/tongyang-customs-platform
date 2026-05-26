@@ -170,6 +170,7 @@ Invoke-Step "Sync DEV version files" {
         }
         $settings.update.channel = "dev"
         $settings.update.stable_manifest_url = "https://github.com/$Repo/releases/latest/download/version.json"
+        $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$Repo/main/config/dev_version.json"
         Write-JsonFile $settings $settingsPath
     }
 }
@@ -201,8 +202,12 @@ Invoke-Step "Generate assets and manifests" {
         --output $distReleaseManifestPath
 
     $releaseManifest = Read-JsonFile $distReleaseManifestPath
+    $releaseManifest.exe_url = "https://github.com/$Repo/releases/download/$tag/$assetName"
+    $releaseManifest.download_url = $releaseManifest.exe_url
+    Write-JsonFile $releaseManifest $distReleaseManifestPath
     New-Item -ItemType Directory -Force -Path (Split-Path $distVersionPath) | Out-Null
     Write-JsonFile $releaseManifest $configVersionPath
+    Write-JsonFile $releaseManifest (Join-Path $root "config\dev_version.json")
     Write-JsonFile $releaseManifest $distVersionPath
 
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
@@ -230,7 +235,7 @@ Invoke-Step "Generate release notes" {
 }
 
 Invoke-Step "Commit release changes" {
-    & $git add config\version.json config\v2_settings.json build_dev_release.ps1 .github\workflows\release.yml scripts\make_release_manifest.py scripts\upload_release_asset.ps1 scripts\verify_release_assets.ps1 scripts\release_manager.ps1 scripts\check_github_release_auth.ps1
+    & $git add config\version.json config\dev_version.json config\v2_settings.json build_dev_release.ps1 .github\workflows\build.yml .github\workflows\release.yml .github\workflows\cleanup_dev_releases.yml scripts\make_release_manifest.py scripts\upload_release_asset.ps1 scripts\verify_release_assets.ps1 scripts\release_manager.ps1 scripts\check_github_release_auth.ps1
     Assert-ExitCode "git add failed"
 
     $hasChanges = & $git status --porcelain
