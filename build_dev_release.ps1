@@ -176,9 +176,12 @@ Invoke-Step "Sync DEV version files" {
 }
 
 Invoke-Step "Run tests" {
-    python -m py_compile v2\ui\main_window.py
+    python -m py_compile v2\ui\main_window.py v2\core\document_understanding.py v2\workflow\splitter.py v2\workflow\matcher.py v2\workflow\engine.py v2\core\parser_engine.py
+    python scripts\test_v2_document_understanding.py
     python scripts\test_v2_document_workflow.py
     python scripts\test_v2_declaration_workflow.py
+    python scripts\test_v2_updater_version_source.py
+    python scripts\test_v2_updater_workflow.py
 }
 
 Invoke-Step "Build EXE" {
@@ -235,7 +238,7 @@ Invoke-Step "Generate release notes" {
 }
 
 Invoke-Step "Commit release changes" {
-    & $git add config\version.json config\dev_version.json config\v2_settings.json build_dev_release.ps1 .github\workflows\build.yml .github\workflows\release.yml .github\workflows\cleanup_dev_releases.yml scripts\make_release_manifest.py scripts\upload_release_asset.ps1 scripts\verify_release_assets.ps1 scripts\release_manager.ps1 scripts\check_github_release_auth.ps1
+    & $git add config app engine templates v2 scripts build_dev_release.ps1 build_v2_exe.ps1 AI_Customs_ERP_V2.spec requirements.txt requirements-build.txt .github docs
     Assert-ExitCode "git add failed"
 
     $hasChanges = & $git status --porcelain

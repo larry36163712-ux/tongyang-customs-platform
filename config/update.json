@@ -1,9 +1,9 @@
 ﻿{
-  "enabled": true,
-  "current_version": "1.1.2-dev",
-  "channel": "dev",
-  "manifest_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
-  "stable_manifest_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
-  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
-  "sha256": "a49aa207234210be0c6f511f0e00e30de4a833e4a7c77454a3a11bddee8dcbe6"
+    "enabled":  true,
+    "current_version":  "1.1.4",
+    "channel":  "stable",
+    "manifest_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
+    "stable_manifest_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json",
+    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
+    "sha256":  "e5478384314d6a5a3b494f4c80b2c8a45bc1f65b96e4c07731c09839d91f421e"
 }

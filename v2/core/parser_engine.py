@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from v2.core.models import CanonicalField, DocumentType, ParsedDocument, ParsedField, SemanticAlias
+from v2.core.document_understanding import SemanticDocumentClassifier
 
 
 class SemanticParserEngine:
@@ -76,6 +77,9 @@ class SemanticParserEngine:
     )
 
     def classify_document(self, text: str) -> DocumentType:
+        semantic = SemanticDocumentClassifier().best(text)
+        if semantic.document_type != DocumentType.UNKNOWN and semantic.confidence >= 0.42:
+            return semantic.document_type
         normalized = text.casefold()
         header = "\n".join(line.strip() for line in text.splitlines()[:8]).casefold()
         first_line = next((line.strip().casefold() for line in text.splitlines() if line.strip()), "")

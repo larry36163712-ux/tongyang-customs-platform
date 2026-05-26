@@ -69,14 +69,14 @@ DOCUMENT_LABELS = {
     DocumentType.DATA_CLEARANCE: "資料清表",
     DocumentType.MATERIAL_CLEARANCE: "用料清表",
     DocumentType.DRAWBACK_CLEARANCE: "核退清表",
-    DocumentType.UNKNOWN: "未知文件",
+    DocumentType.UNKNOWN: "尚未成功辨識",
 }
 
 STATUS_LABELS = {
     CheckStatus.MATCH: "一致",
     CheckStatus.MISMATCH: "不一致",
     CheckStatus.MISSING: "缺少欄位",
-    CheckStatus.HIGH_RISK: "高風險 warning",
+    CheckStatus.HIGH_RISK: "高風險",
 }
 
 FIELD_LABELS = {
@@ -418,6 +418,7 @@ class CustomsErpWindow(QMainWindow):
         self.status_version = QLabel()
         self.status_build = QLabel()
         self.status_update = QLabel()
+        self.status_check_update_button = QPushButton("檢查更新")
         self.updater_debug_info = QLabel()
         self.workflow_case_list: QListWidget | None = None
         self.workflow_tree: QTreeWidget | None = None
@@ -435,6 +436,7 @@ class CustomsErpWindow(QMainWindow):
         self._build_shell()
         self._apply_theme()
         self._set_update_status("尚未檢查更新", "neutral")
+        self._apply_developer_mode_visibility()
         self._refresh_updater_debug_info(local_only=True)
 
         if self.settings.update.check_on_startup:
@@ -450,14 +452,14 @@ class CustomsErpWindow(QMainWindow):
         settings_action.triggered.connect(self._open_settings_dialog)
         check_update_action = QAction("檢查更新", self)
         check_update_action.triggered.connect(lambda: self._check_updates(interactive=True))
-        updater_debug_action = QAction("Updater Debug", self)
-        updater_debug_action.triggered.connect(self._open_updater_debug_dialog)
-        updater_reset_action = QAction("Reset Updater State", self)
-        updater_reset_action.triggered.connect(lambda: self._reset_updater_state(show_message=True))
+        self.updater_debug_action = QAction("Updater Debug", self)
+        self.updater_debug_action.triggered.connect(self._open_updater_debug_dialog)
+        self.updater_reset_action = QAction("Reset Updater State", self)
+        self.updater_reset_action.triggered.connect(lambda: self._reset_updater_state(show_message=True))
         self.menuBar().addAction(settings_action)
         self.menuBar().addAction(check_update_action)
-        self.menuBar().addAction(updater_debug_action)
-        self.menuBar().addAction(updater_reset_action)
+        self.menuBar().addAction(self.updater_debug_action)
+        self.menuBar().addAction(self.updater_reset_action)
 
     def _build_shell(self) -> None:
         root = QWidget()
@@ -533,43 +535,45 @@ class CustomsErpWindow(QMainWindow):
         mode.addItems(["import", "export"])
         mode.setCurrentText(direction)
         mode.setObjectName("WorkflowMode")
-        upload_button = QPushButton("選擇文件")
-        upload_button.clicked.connect(lambda: self._choose_workflow_documents(mode.currentText(), view_name))
-        folder_button = QPushButton("選擇資料夾")
-        folder_button.clicked.connect(lambda: self._choose_workflow_folder(mode.currentText(), view_name))
         header_row.addWidget(title)
         header_row.addStretch(1)
-        header_row.addWidget(QLabel("流程"))
+        header_row.addWidget(QLabel("案件類型"))
         header_row.addWidget(mode)
-        header_row.addWidget(upload_button)
-        header_row.addWidget(folder_button)
         layout.addLayout(header_row)
 
         upload_panel = QFrame()
         upload_panel.setObjectName("WorkflowUpload")
+        upload_panel.setMaximumHeight(140)
         upload_layout = QVBoxLayout(upload_panel)
-        upload_layout.setContentsMargins(14, 12, 14, 12)
-        upload_layout.setSpacing(10)
+        upload_layout.setContentsMargins(14, 10, 14, 10)
+        upload_layout.setSpacing(8)
+        upload_top = QHBoxLayout()
         upload_list = DocumentDropList()
-        upload_list.setMinimumHeight(78)
-        upload_list.addItem("拖曳多份 PDF / 影像 / TXT 到這裡，或按「選擇文件」批次上傳")
-        upload_list.addItem("或按「選擇資料夾」自動掃描整批報關文件")
+        upload_list.setMaximumHeight(58)
+        upload_list.addItem("拖曳 INV / PACKING / B/L / 報單 / 清表到這裡")
         upload_list.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
-        upload_layout.addWidget(upload_list)
+        upload_button = QPushButton("選擇文件")
+        upload_button.clicked.connect(lambda: self._choose_workflow_documents(mode.currentText(), view_name))
+        folder_button = QPushButton("選擇資料夾")
+        folder_button.clicked.connect(lambda: self._choose_workflow_folder(mode.currentText(), view_name))
+        upload_top.addWidget(upload_list, 1)
+        upload_top.addWidget(upload_button)
+        upload_top.addWidget(folder_button)
+        upload_layout.addLayout(upload_top)
 
         progress_row = QHBoxLayout()
         upload_progress = QProgressBar()
         upload_progress.setRange(0, 100)
         upload_progress.setValue(0)
-        upload_progress.setFormat("Upload 0%")
+        upload_progress.setFormat("Upload %p%")
         ocr_progress = QProgressBar()
         ocr_progress.setRange(0, 100)
         ocr_progress.setValue(0)
-        ocr_progress.setFormat("OCR 0%")
+        ocr_progress.setFormat("OCR %p%")
         workflow_progress = QProgressBar()
         workflow_progress.setRange(0, 100)
         workflow_progress.setValue(0)
-        workflow_progress.setFormat("流程處理")
+        workflow_progress.setFormat("AI Audit %p%")
         progress_row.addWidget(upload_progress)
         progress_row.addWidget(ocr_progress)
         progress_row.addWidget(workflow_progress)
@@ -582,9 +586,9 @@ class CustomsErpWindow(QMainWindow):
         status_layout.setContentsMargins(12, 8, 12, 8)
         status_layout.setSpacing(8)
         status_steps: list[QLabel] = []
-        for index, step in enumerate(["上傳", "讀取", "分類", "組案", "核對", "摘要", "完成"]):
+        for index, step in enumerate(["文件分析中", "OCR 辨識中", "AI 核對中", "已完成"]):
             if index:
-                arrow = QLabel(">")
+                arrow = QLabel("·")
                 arrow.setObjectName("WorkflowArrow")
                 status_layout.addWidget(arrow)
             label = QLabel(step)
@@ -605,25 +609,24 @@ class CustomsErpWindow(QMainWindow):
         document_status_layout.setSpacing(6)
         document_status_layout.addStretch(1)
 
-        self.workflow_tree = QTreeWidget()
-        self.workflow_tree.setHeaderLabels(["文件", "完整度", "文件名稱", "頁數"])
-        self.workflow_tree.setObjectName("ResultBox")
-        self.workflow_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self.workflow_tree.setMinimumHeight(170)
+        document_cards = QListWidget()
+        document_cards.setObjectName("DocumentCards")
+        document_cards.setSpacing(8)
+        document_cards.itemClicked.connect(lambda item, view=view_name: self._on_document_card_clicked(item, view))
 
         compare_table = QTableWidget()
-        compare_table.setColumnCount(4)
-        compare_table.setHorizontalHeaderLabels(["欄位", "文件值", "報單值", "結果"])
+        compare_table.setColumnCount(6)
+        compare_table.setHorizontalHeaderLabels(["欄位名稱", "INV", "PACKING", "B/L", "報單", "結果"])
         compare_table.setObjectName("CompareTable")
         compare_table.verticalHeader().setVisible(False)
         compare_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         compare_table.setSortingEnabled(True)
-        compare_table.setMinimumHeight(430)
+        compare_table.setMinimumHeight(260)
 
         compare_search = QLineEdit()
-        compare_search.setPlaceholderText("搜尋欄位、文件值、報單值")
+        compare_search.setPlaceholderText("搜尋欄位或差異原因")
         compare_search.setObjectName("CompareSearch")
-        compare_only_issues = QCheckBox("只顯示異常")
+        compare_only_issues = QCheckBox("只看需確認項目")
         compare_only_issues.setChecked(False)
         compare_search.textChanged.connect(lambda _text, view=view_name: self._apply_compare_filters(view))
         compare_only_issues.toggled.connect(lambda _checked, view=view_name: self._apply_compare_filters(view))
@@ -631,7 +634,8 @@ class CustomsErpWindow(QMainWindow):
         audit_report_view = QTextEdit()
         audit_report_view.setReadOnly(True)
         audit_report_view.setObjectName("AuditReportView")
-        audit_report_view.setPlaceholderText("完整人工核對報告會顯示在這裡")
+        audit_report_view.setPlaceholderText("完成文件讀取後，這裡會產生正式報關核對報告")
+        audit_report_view.setMaximumHeight(210)
 
         audit_summary = QTextEdit()
         audit_summary.setReadOnly(True)
@@ -648,36 +652,72 @@ class CustomsErpWindow(QMainWindow):
         debug_toggle.setChecked(False)
         debug_toggle.toggled.connect(self.workflow_debug.setVisible)
 
+        left_panel = QFrame()
+        left_panel.setObjectName("AuditSidePanel")
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(10)
+        left_title = QLabel("報關案件文件區")
+        left_title.setObjectName("PanelTitle")
+        left_layout.addWidget(left_title)
+        left_layout.addWidget(document_status_bar)
+        left_layout.addWidget(document_cards, 1)
+
         audit_workspace = QFrame()
         audit_workspace.setObjectName("AuditWorkspace")
         center = QVBoxLayout(audit_workspace)
         center.setContentsMargins(0, 0, 0, 0)
         center.setSpacing(10)
-        center.addWidget(QLabel("AI Customs Audit Report"))
-        center.addWidget(audit_report_view, 1)
+        status_line = QHBoxLayout()
+        status_label = QLabel("● 等待文件")
+        status_label.setObjectName("AuditStatusBadge")
+        status_line.addWidget(status_label)
+        status_line.addStretch(1)
+        status_line.addWidget(status_bar)
+        center.addLayout(status_line)
 
-        summary_panel = QFrame()
-        summary_panel.setObjectName("AuditSummaryPanel")
-        summary_layout = QVBoxLayout(summary_panel)
+        report_title = QLabel("案件摘要 / AI 建議")
+        report_title.setObjectName("PanelTitle")
+        center.addWidget(report_title)
+        center.addWidget(audit_report_view)
+        table_tools = QHBoxLayout()
+        table_title = QLabel("海關核對差異表")
+        table_title.setObjectName("PanelTitle")
+        table_tools.addWidget(table_title)
+        table_tools.addStretch(1)
+        table_tools.addWidget(compare_search)
+        table_tools.addWidget(compare_only_issues)
+        center.addLayout(table_tools)
+        center.addWidget(compare_table, 4)
+
+        risk_panel = QFrame()
+        risk_panel.setObjectName("AuditSummaryPanel")
+        summary_layout = QVBoxLayout(risk_panel)
         summary_layout.setContentsMargins(0, 0, 0, 0)
-        summary_layout.setSpacing(10)
-        summary_layout.addWidget(QLabel("文件與流程狀態"))
-        summary_layout.addWidget(document_status_bar)
-        summary_layout.addWidget(status_bar)
-        summary_layout.addWidget(audit_summary, 1)
+        summary_layout.setSpacing(8)
+        right_title = QLabel("異常摘要 / 高風險提示")
+        right_title.setObjectName("PanelTitle")
+        summary_layout.addWidget(right_title)
+        summary_layout.addWidget(audit_summary)
+        summary_layout.addWidget(debug_toggle)
+        summary_layout.addWidget(self.workflow_debug)
+        center.addWidget(risk_panel, 1)
         self.workflow_debug.hide()
+        debug_toggle.setVisible(self.settings.developer_mode)
 
-        body.addWidget(summary_panel)
+        body.addWidget(left_panel)
         body.addWidget(audit_workspace)
-        body.setStretchFactor(0, 3)
-        body.setStretchFactor(1, 7)
-        body.setSizes([340, 980])
+        body.setStretchFactor(0, 35)
+        body.setStretchFactor(1, 65)
+        body.setSizes([430, 810])
         layout.addWidget(body, 1)
         self.workflow_views[view_name] = {
-            "tree": self.workflow_tree,
+            "tree": None,
+            "document_cards": document_cards,
             "table": compare_table,
             "audit_report": audit_report_view,
             "summary": audit_summary,
+            "audit_status_label": status_label,
             "document_status_bar": document_status_bar,
             "document_status_layout": document_status_layout,
             "debug": self.workflow_debug,
@@ -714,6 +754,8 @@ class CustomsErpWindow(QMainWindow):
         self.status_build.setText(self._format_build_badge())
         self.status_build.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status_update.setObjectName("StatusMessage")
+        self.status_check_update_button.setObjectName("SecondaryButton")
+        self.status_check_update_button.clicked.connect(lambda: self._check_updates(interactive=True))
         self.updater_debug_info.setObjectName("UpdaterDebugInfo")
         self.updater_debug_info.setWordWrap(True)
         self.updater_debug_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -725,6 +767,7 @@ class CustomsErpWindow(QMainWindow):
         layout.addWidget(self.status_build)
         layout.addSpacing(14)
         layout.addWidget(self.status_update)
+        layout.addWidget(self.status_check_update_button)
         layout.addSpacing(18)
         layout.addWidget(self.updater_debug_info, 1)
         layout.addStretch(1)
@@ -758,6 +801,7 @@ class CustomsErpWindow(QMainWindow):
         view = self.workflow_views.get(view_name, {})
         case_list = view.get("case_list")
         tree = view.get("tree")
+        document_cards = view.get("document_cards")
         table = view.get("table")
         audit_report = view.get("audit_report")
         summary = view.get("summary")
@@ -768,23 +812,25 @@ class CustomsErpWindow(QMainWindow):
             for path in paths:
                 upload.addItem(path)
             if intake_mode == "folder":
-                upload.addItem("Auto Intake: 掃描資料夾並依文件內容分類 / 分票 / 核對")
+                upload.addItem("整批文件已送入自動核對流程")
         if isinstance(case_list, QTableWidget):
             case_list.setRowCount(1)
             for col, value in enumerate(["processing", "處理中", "-", "-", "-", str(len(paths)), "-", "-"]):
                 case_list.setItem(0, col, QTableWidgetItem(value))
         if isinstance(tree, QTreeWidget):
             tree.clear()
+        if isinstance(document_cards, QListWidget):
+            document_cards.clear()
         if isinstance(table, QTableWidget):
             table.setRowCount(0)
         if isinstance(audit_report, QTextEdit):
-            audit_report.setText("文件處理中...\n\n正在執行 OCR、parser、workflow grouping 與 audit report generation。")
+            audit_report.setText("文件處理中...\n\n系統正在讀取文件、辨識種類、建立案件並進行報關核對。")
         if isinstance(summary, QTextEdit):
-            summary.setText("等待 OCR / parser / audit 結果。")
+            summary.setText("文件核對中，完成後會列出需人工確認或高風險項目。")
         if isinstance(debug, QTextEdit):
             debug.clear()
         self._reset_workflow_progress(view_name)
-        self._set_workflow_progress(view_name, "Upload", 3, "workflow task queued")
+        self._set_workflow_progress(view_name, "Upload", 3, "文件已加入核對流程")
 
         self.workflow_thread = QThread(self)
         self.workflow_thread.setProperty("workflow_view", view_name)
@@ -843,6 +889,13 @@ class CustomsErpWindow(QMainWindow):
     def _format_workflow_failure(self, stage: str, message: str, traceback_text: str) -> str:
         details = traceback_text.strip() or "No traceback captured."
         runtime_log = logs_dir() / "runtime.log"
+        if not self.settings.developer_mode:
+            return (
+                "AI Customs Audit Report\n\n"
+                "核對結果：✗ 系統處理中斷\n\n"
+                "說明：文件讀取或核對流程未完成，請先確認檔案是否可開啟、格式是否正確，再重新上傳。\n\n"
+                f"需處理事項：{self._human_workflow_message(stage, message)}"
+            )
         return (
             f"❌ {stage} failed\n\n"
             f"原因:\n{message}\n\n"
@@ -856,7 +909,7 @@ class CustomsErpWindow(QMainWindow):
         for key, text in (
             ("upload_progress", "Upload 0%"),
             ("ocr_progress", "OCR 0%"),
-            ("workflow_progress", "流程處理 0%"),
+            ("workflow_progress", "AI Audit 0%"),
         ):
             progress = view.get(key)
             if isinstance(progress, QProgressBar):
@@ -873,6 +926,7 @@ class CustomsErpWindow(QMainWindow):
 
     def _set_workflow_progress(self, view_name: str, stage: str, percent: int, message: str) -> None:
         view = self.workflow_views.get(view_name, {})
+        display_message = self._human_workflow_message(stage, message)
         upload_progress = view.get("upload_progress")
         ocr_progress = view.get("ocr_progress")
         workflow_progress = view.get("workflow_progress")
@@ -893,21 +947,21 @@ class CustomsErpWindow(QMainWindow):
         if isinstance(workflow_progress, QProgressBar):
             workflow_value = 0 if percent < 35 else int((percent - 35) * 100 / 65)
             workflow_progress.setValue(min(100, workflow_value))
-            workflow_progress.setFormat(f"流程處理 {min(100, workflow_value)}%")
+            workflow_progress.setFormat(f"AI Audit {min(100, workflow_value)}%")
         steps = view.get("status_steps")
         if isinstance(steps, list):
             stage_index = {
                 "Upload": 0,
                 "OCR": 1,
-                "Document Split": 2,
-                "parser": 2,
-                "Type Detection": 2,
-                "workflow grouping": 3,
-                "Workflow Match": 3,
-                "audit": 4,
-                "Audit": 4,
-                "Completed": 6,
-                "workflow pipeline": 6,
+                "Document Split": 1,
+                "parser": 1,
+                "Type Detection": 1,
+                "workflow grouping": 2,
+                "Workflow Match": 2,
+                "audit": 2,
+                "Audit": 2,
+                "Completed": 3,
+                "workflow pipeline": 3,
             }
             active_index = stage_index.get(stage, -1)
             if stage == "Exception":
@@ -919,9 +973,29 @@ class CustomsErpWindow(QMainWindow):
                 if (stage == "Exception" or "failed" in message.lower() or "timeout" in message.lower()) and index == active_index:
                     state = "error"
                 label.setProperty("state", state)
-                label.setToolTip(message)
+                label.setToolTip(display_message)
                 label.style().unpolish(label)
                 label.style().polish(label)
+
+    def _human_workflow_message(self, stage: str, message: str) -> str:
+        text = f"{stage} {message}".strip()
+        replacements = {
+            "parser": "文件辨識",
+            "workflow grouping": "自動分組",
+            "workflow pipeline": "案件核對流程",
+            "pipeline": "處理流程",
+            "audit": "自動核對",
+            "Completed": "完成",
+            "Upload": "上傳",
+            "Document Split": "文件整理",
+            "Type Detection": "文件辨識",
+            "Workflow Match": "自動分組",
+        }
+        for raw, label in replacements.items():
+            text = text.replace(raw, label)
+        if "WARNING_" in text or "COMPARE_" in text:
+            return "系統偵測到需人工確認的核對項目"
+        return text
 
     def _refresh_workflow_cases(self, view_name: str = "case") -> None:
         result = self.workflow_results.get(view_name) or self.workflow_result
@@ -934,7 +1008,7 @@ class CustomsErpWindow(QMainWindow):
                 self._render_workflow_result_without_case(result, view_name)
                 debug = view.get("debug")
                 if isinstance(debug, QTextEdit):
-                    debug.setText("未建立 workflow。請確認文件內是否包含可辨識的 INV / B/L / Booking / DS2 資訊。")
+                    debug.setText("未建立案件。請確認文件內是否包含可辨識的 INV / B/L / Booking / DS2 資訊。")
             return
         if not result or not isinstance(case_list, QTableWidget):
             return
@@ -1069,19 +1143,25 @@ class CustomsErpWindow(QMainWindow):
     def _render_workflow_case(self, case: CaseWorkflow, view_name: str = "case") -> None:
         view = self.workflow_views.get(view_name, {})
         tree = view.get("tree")
+        document_cards = view.get("document_cards")
         table = view.get("table")
         audit_report = view.get("audit_report")
         summary = view.get("summary")
         debug = view.get("debug")
+        audit_status_label = view.get("audit_status_label")
         self.current_workflow_cases[view_name] = case
         self._render_document_status_bar(case, view_name)
         self._update_workflow_section_states(case, view_name)
+        if isinstance(document_cards, QListWidget):
+            self._populate_document_cards(document_cards, case)
         if isinstance(tree, QTreeWidget):
             tree.clear()
             vm = self._case_view_model(case)
-            root = QTreeWidgetItem([vm.case_id, vm.status, "", ""])
+            root = QTreeWidgetItem([f"案件：{vm.case_id}", vm.status, "", ""])
             tree.addTopLevelItem(root)
             for item in self._document_checklist_items(case):
+                root.addChild(item)
+            for item in self._manual_review_items(case):
                 root.addChild(item)
             root.setExpanded(True)
 
@@ -1089,9 +1169,14 @@ class CustomsErpWindow(QMainWindow):
             self._populate_compare_table(table, case)
             self._apply_compare_filters(view_name)
         if isinstance(audit_report, QTextEdit):
-            audit_report.setText(self.audit_report_engine.build_text(case))
+            audit_report.setText(self._format_case_workspace_summary(case))
         if isinstance(summary, QTextEdit):
             summary.setText(self._format_risk_summary(case))
+        if isinstance(audit_status_label, QLabel):
+            audit_status_label.setText(self._audit_status_badge(case))
+            audit_status_label.setProperty("state", self._case_status_key(case))
+            audit_status_label.style().unpolish(audit_status_label)
+            audit_status_label.style().polish(audit_status_label)
         elif isinstance(summary, QLabel):
             summary.setText(self._format_audit_summary_card(case))
         if isinstance(debug, QTextEdit):
@@ -1102,8 +1187,14 @@ class CustomsErpWindow(QMainWindow):
         audit_report = view.get("audit_report")
         summary = view.get("summary")
         table = view.get("table")
+        document_cards = view.get("document_cards")
+        audit_status_label = view.get("audit_status_label")
         if isinstance(table, QTableWidget):
             table.setRowCount(0)
+        if isinstance(document_cards, QListWidget):
+            self._populate_intake_document_cards(document_cards, result)
+        if isinstance(audit_status_label, QLabel):
+            audit_status_label.setText("● 需補件或人工確認")
         text = self._format_intake_report(result)
         if isinstance(audit_report, QTextEdit):
             audit_report.setText(text)
@@ -1116,10 +1207,14 @@ class CustomsErpWindow(QMainWindow):
 
     def _format_intake_report(self, result: WorkflowResult) -> str:
         lines = [
-            "AI Customs Audit Report",
-            "目前已完成 OCR / parser，但尚未建立可完整核對的案件 workflow。",
+            "案件摘要",
+            "核對狀態：⚠ 需人工確認",
+            "風險等級：中風險",
             "",
-            "一、文件完整度",
+            "原因：",
+            "目前已完成文件讀取，但尚未建立可完整核對的案件。",
+            "",
+            "文件完整性：",
         ]
         if result.segments:
             for segment in result.segments:
@@ -1132,14 +1227,101 @@ class CustomsErpWindow(QMainWindow):
             lines.extend(["", "缺少文件：", "、".join(missing)])
         lines.extend([
             "",
-            "二、核對狀態",
-            "結果：",
-            "⚠ 需補件或人工確認",
-            "",
-            "說明：",
-            "系統已完成文件讀取與 parser，但缺少足夠的 grouping key 或必要文件，因此尚不能產生船名航次、件數、重量、CIF、稅則等完整核對段落。",
+            "AI 建議：",
+            "系統已完成文件讀取，但缺少足夠的單號或必要文件，因此尚不能產生船名航次、件數、重量、CIF、稅則等完整核對段落。",
         ])
         return "\n".join(lines)
+
+    def _format_case_workspace_summary(self, case: CaseWorkflow) -> str:
+        status_key = self._case_status_key(case)
+        status = {
+            "completed": "✓ 可進行報關核對",
+            "missing_docs": "⚠ 需補件",
+            "exception": "⚠ 需人工確認",
+            "processing": "⚠ 需人工確認",
+        }.get(status_key, "⚠ 需人工確認")
+        risk = self._risk_level_label(case)
+        reasons = self._risk_reason_lines(case)
+        completeness = self._document_completeness_lines(case)
+        lines = [
+            f"案件：{case.match_keys.get('customer') or case.match_keys.get('invoice_no') or case.case_id}",
+            f"核對狀態：{status}",
+            f"風險等級：{risk}",
+            "",
+            "原因：",
+            *(reasons or ["目前未發現阻擋核對的重大異常。"]),
+            "",
+            "文件完整性：",
+            *completeness,
+            "",
+            "AI 建議：",
+            self._ai_recommendation(case),
+        ]
+        return "\n".join(lines)
+
+    def _risk_level_label(self, case: CaseWorkflow) -> str:
+        if case.missing_documents:
+            return "中風險"
+        if case.audit_report and any(result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK} for result in case.audit_report.results):
+            return "高風險"
+        if case.audit_report and any(result.status == CheckStatus.MISSING for result in case.audit_report.results):
+            return "中風險"
+        return "低風險"
+
+    def _risk_reason_lines(self, case: CaseWorkflow) -> list[str]:
+        lines: list[str] = []
+        if case.missing_documents:
+            lines.append(f"缺少 {'、'.join(self._human_document_name(name) for name in case.missing_documents)}，目前尚無法完成最終海關核對。")
+        if case.manual_confirm_queue:
+            lines.append("已收到部分疑似文件，但辨識信心不足，需人工確認文件類型。")
+        if case.audit_report:
+            mismatches = [
+                FIELD_LABELS.get(result.field.value, result.field.value)
+                for result in case.audit_report.results
+                if result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK}
+            ]
+            if mismatches:
+                lines.append(f"{'、'.join(dict.fromkeys(mismatches))} 需人工確認。")
+        return lines
+
+    def _ai_recommendation(self, case: CaseWorkflow) -> str:
+        if case.missing_documents:
+            return "請先補齊缺少文件，再進行稅則、金額、重量與船名航次最終核對。"
+        if case.audit_report and any(result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK} for result in case.audit_report.results):
+            return "請優先確認紅色差異欄位，必要時回查發票、裝箱單與報單原始資料。"
+        return "目前主要欄位未見重大異常，可進入人工覆核與歸檔。"
+
+    def _document_completeness_lines(self, case: CaseWorkflow) -> list[str]:
+        labels = {
+            DocumentType.INVOICE.value: "INV",
+            DocumentType.PACKING_LIST.value: "PACKING",
+            DocumentType.BILL_OF_LADING.value: "B/L",
+            DocumentType.DS2_DECLARATION.value: "報單",
+            DocumentType.EXPORT_DECLARATION.value: "報單",
+        }
+        present = {
+            self._segment_effective_type(segment).value
+            for segment in case.documents
+        }
+        required = [DocumentType.INVOICE.value, DocumentType.PACKING_LIST.value, DocumentType.BILL_OF_LADING.value]
+        required.append(DocumentType.EXPORT_DECLARATION.value if case.direction == "export" else DocumentType.DS2_DECLARATION.value)
+        candidate_present = set(case.fallback_document_candidates)
+        lines = []
+        for key in required:
+            if key in present:
+                lines.append(f"✓ {labels.get(key, key)}")
+            elif key in candidate_present:
+                lines.append(f"⚠ 疑似 {labels.get(key, key)}，待人工確認")
+            else:
+                lines.append(f"✗ {labels.get(key, key)}")
+        return lines
+
+    def _audit_status_badge(self, case: CaseWorkflow) -> str:
+        if self._case_status_key(case) == "completed":
+            return "● 已完成"
+        if case.missing_documents:
+            return "● 需補件"
+        return "● AI 核對中"
 
     def _infer_missing_documents_from_segments(self, result: WorkflowResult) -> list[str]:
         found = {
@@ -1148,6 +1330,112 @@ class CustomsErpWindow(QMainWindow):
         }
         required = ["DS2 報單", "INV", "PKG", "B/L"] if result.direction != "export" else ["出口報單", "INV", "PKG", "BOOKING", "B/L"]
         return [name for name in required if name not in found and not (name == "PKG" and "PL / PKG" in found)]
+
+    def _populate_document_cards(self, list_widget: QListWidget, case: CaseWorkflow) -> None:
+        list_widget.clear()
+        groups = self._document_groups(case)
+        order = [
+            ("invoice", "✓ 發票 INV"),
+            ("packing", "✓ 包裝單 PACKING"),
+            ("declaration", "⚠ 報單"),
+            ("bl", "✗ B/L"),
+            ("unknown", "⚠ 尚未成功辨識"),
+        ]
+        for key, title in order:
+            files = groups.get(key, [])
+            text = self._document_card_text(key, title, files, case)
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, {"type": key, "files": files})
+            item.setSizeHint(item.sizeHint().expandedTo(item.sizeHint()))
+            list_widget.addItem(item)
+
+    def _populate_intake_document_cards(self, list_widget: QListWidget, result: WorkflowResult) -> None:
+        list_widget.clear()
+        for segment in result.segments:
+            parsed = segment.parsed
+            doc_type = parsed.document_type if parsed else segment.detected_type
+            label = "尚未成功辨識" if doc_type == DocumentType.UNKNOWN else self._document_label(doc_type)
+            item = QListWidgetItem(f"⚠ {label}\n{segment.source_name}\n可能為掃描品質、格式或文件內容不足，請人工確認。")
+            item.setData(Qt.ItemDataRole.UserRole, {"type": doc_type.value, "files": [segment.source_name]})
+            list_widget.addItem(item)
+        if not result.segments:
+            list_widget.addItem(QListWidgetItem("⚠ 尚未成功辨識\n請確認檔案是否可開啟，或重新上傳較清楚的文件。"))
+
+    def _document_groups(self, case: CaseWorkflow) -> dict[str, list[str]]:
+        groups = {"invoice": [], "packing": [], "declaration": [], "bl": [], "unknown": []}
+        for segment in case.documents:
+            doc_type = self._segment_effective_type(segment)
+            suffix = ""
+            best = segment.candidates[0] if segment.candidates else None
+            if best and best.needs_manual_confirm:
+                suffix = f"（Confidence：{int(best.confidence * 100)}%，AI低信心待確認）"
+            if doc_type == DocumentType.INVOICE:
+                groups["invoice"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.PACKING_LIST:
+                groups["packing"].append(segment.source_name + suffix)
+            elif doc_type in {DocumentType.DS2_DECLARATION, DocumentType.EXPORT_DECLARATION}:
+                groups["declaration"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.BILL_OF_LADING:
+                groups["bl"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.UNKNOWN:
+                groups["unknown"].append(segment.source_name)
+        return groups
+
+    def _segment_effective_type(self, segment) -> DocumentType:
+        parsed = segment.parsed
+        if parsed and parsed.document_type != DocumentType.UNKNOWN:
+            return parsed.document_type
+        if segment.detected_type != DocumentType.UNKNOWN:
+            return segment.detected_type
+        if segment.candidates:
+            best = segment.candidates[0]
+            if best.confidence >= 0.42:
+                return best.document_type
+        return DocumentType.UNKNOWN
+
+    def _document_card_text(self, key: str, title: str, files: list[str], case: CaseWorkflow) -> str:
+        missing_titles = {
+            "invoice": "✗ 發票 INV\n尚未提供",
+            "packing": "✗ 包裝單 PACKING\n尚未提供",
+            "declaration": "⚠ 報單\n尚未成功辨識\n可能為掃描品質或格式問題",
+            "bl": "✗ B/L\n尚未提供",
+            "unknown": "",
+        }
+        if not files:
+            return missing_titles.get(key, "")
+        if key == "unknown":
+            return "⚠ 尚未成功辨識\n" + "\n".join(files[:4]) + "\n可能為掃描品質、格式或文件內容不足，請人工確認。"
+        status_title = title
+        if key == "declaration":
+            status_title = "✓ 報單"
+        elif key == "bl":
+            status_title = "✓ B/L"
+        return status_title + "\n" + "\n".join(files[:5])
+
+    def _on_document_card_clicked(self, item: QListWidgetItem, view_name: str = "case") -> None:
+        view = self.workflow_views.get(view_name, {})
+        audit_report = view.get("audit_report")
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(audit_report, QTextEdit) or not isinstance(data, dict):
+            return
+        files = data.get("files") or []
+        doc_type = str(data.get("type", ""))
+        title = self._human_document_name(doc_type)
+        if doc_type == "unknown":
+            title = "尚未成功辨識"
+        lines = [
+            f"文件：{title}",
+            "",
+            "文件內容：",
+            *([f"- {name}" for name in files] if files else ["- 尚未提供"]),
+            "",
+            "AI 解析結果：",
+            "請查看下方差異核對表與右側高風險提示；若此文件尚未成功辨識，建議重新提供較清晰掃描或原始 PDF。",
+            "",
+            "差異核對：",
+            "此文件已納入本案欄位比對。請優先查看紅色與黃色欄位。",
+        ]
+        audit_report.setText("\n".join(lines))
 
     def _render_workflow_section(self, case: CaseWorkflow, section_key: str, view_name: str = "case") -> None:
         view = self.workflow_views.get(view_name, {})
@@ -1165,31 +1453,52 @@ class CustomsErpWindow(QMainWindow):
 
     def _format_risk_summary(self, case: CaseWorkflow) -> str:
         lines: list[str] = []
-        lines.append("文件狀態")
-        for segment in case.documents:
-            parsed = segment.parsed
-            document_type = self._document_label(parsed.document_type if parsed else segment.detected_type)
-            lines.append(f"✓ {document_type} - {segment.source_name}")
         if case.missing_documents:
-            lines.append("")
-            lines.append("待補文件")
-        for missing in case.missing_documents:
-            lines.append(f"⚠ 缺少 {missing}")
-        lines.append("")
-        lines.append("風險提醒")
+            for missing in case.missing_documents:
+                lines.append(f"✗ 缺少 {self._human_document_name(missing)}")
+        for item in case.manual_confirm_queue:
+            lines.append(f"⚠ {self._humanize_warning(item)}")
         if case.audit_report:
             for result in case.audit_report.results:
                 if result.status == CheckStatus.MISMATCH:
-                    lines.append(f"⚠ {FIELD_LABELS.get(result.field.value, result.field.value)} 不一致")
+                    lines.append(f"✗ {FIELD_LABELS.get(result.field.value, result.field.value)} 不一致")
                 elif result.status == CheckStatus.MISSING:
-                    lines.append(f"⚠ {FIELD_LABELS.get(result.field.value, result.field.value)} 無法確認")
+                    lines.append(f"✗ {FIELD_LABELS.get(result.field.value, result.field.value)} 資料不足")
                 elif result.status == CheckStatus.HIGH_RISK:
                     lines.append(f"⚠ {FIELD_LABELS.get(result.field.value, result.field.value)} 高風險")
-            lines.extend(f"⚠ {warning}" for warning in case.audit_report.high_risk_warnings)
-        lines.extend(f"⚠ {finding}" for finding in case.rule_findings)
-        if lines[-1] == "風險提醒":
-            lines.append("目前未發現阻擋申報的異常。")
+            lines.extend(f"⚠ {self._humanize_warning(warning)}" for warning in case.audit_report.high_risk_warnings)
+        lines.extend(f"⚠ {self._humanize_warning(finding)}" for finding in case.rule_findings)
+        if not lines:
+            lines.append("✓ 目前未發現需要立即處理的高風險項目。")
         return "\n".join(dict.fromkeys(lines))
+
+    def _human_document_name(self, value: str) -> str:
+        text = str(value)
+        mapping = {
+            "DS2_DECLARATION": "DS2 報單",
+            "EXPORT_DECLARATION": "出口報單",
+            "BILL_OF_LADING": "B/L",
+            "PACKING_LIST": "PACKING",
+            "INVOICE": "INV",
+        }
+        for raw, label in mapping.items():
+            text = text.replace(raw, label)
+        return text.replace("_", " ")
+
+    def _humanize_warning(self, value: str) -> str:
+        text = self._human_document_name(value)
+        replacements = {
+            "WARNING_GLOBAL_DECLARATION_IS_CORE": "報單為核心文件，請確認報單資料是否為正式版本",
+            "COMPARE_COMMON_FIELDS": "共通欄位需人工確認",
+            "declaration core": "報單核心資料",
+            "workflow grouping": "案件分組",
+            "parser": "文件讀取",
+            "semantic": "內容比對",
+            "pipeline": "處理流程",
+        }
+        for raw, label in replacements.items():
+            text = text.replace(raw, label)
+        return text
 
     def _update_workflow_section_states(self, case: CaseWorkflow, view_name: str = "case") -> None:
         view = self.workflow_views.get(view_name, {})
@@ -1259,7 +1568,7 @@ class CustomsErpWindow(QMainWindow):
 
     def _document_status_items(self, case: CaseWorkflow) -> list[tuple[str, str, str]]:
         present = {
-            (segment.parsed.document_type if segment.parsed else segment.detected_type).value: segment
+            self._segment_effective_type(segment).value: segment
             for segment in case.documents
         }
         required = (
@@ -1282,11 +1591,15 @@ class CustomsErpWindow(QMainWindow):
         for document_key, label in required:
             segment = present.get(document_key)
             if not segment:
-                items.append((f"{label} ✗", "missing", "缺少此文件"))
-            elif segment.confidence < 0.55:
-                items.append((f"{label} ⚠", "warning", f"OCR 待確認: {segment.source_name}"))
+                candidates = case.fallback_document_candidates.get(document_key, [])
+                if candidates:
+                    items.append((f"{label} ⚠", "warning", f"AI低信心待確認: {', '.join(candidates)}"))
+                else:
+                    items.append((f"{label} ✗", "missing", "缺少此文件"))
+            elif segment.document_confidence < 0.78 or segment.manual_confirm_reason:
+                items.append((f"{label} ⚠", "warning", f"AI低信心待確認: {segment.source_name}"))
             else:
-                items.append((f"{label} ✓", "ok", segment.source_name))
+                items.append((f"{label} ✓", "ok", f"已確認文件: {segment.source_name}"))
         return items
 
     def _format_audit_summary_card(self, case: CaseWorkflow) -> str:
@@ -1311,7 +1624,7 @@ class CustomsErpWindow(QMainWindow):
 
     def _document_checklist_items(self, case: CaseWorkflow) -> list[QTreeWidgetItem]:
         present = {
-            (segment.parsed.document_type if segment.parsed else segment.detected_type).value: segment
+            self._segment_effective_type(segment).value: segment
             for segment in case.documents
         }
         required = (
@@ -1335,23 +1648,44 @@ class CustomsErpWindow(QMainWindow):
         for document_key, document_label in required:
             segment = present.get(document_key)
             if segment:
-                status = "✓ 已收到" if segment.confidence >= 0.55 else "⚠ OCR 待確認"
-                item = QTreeWidgetItem([document_label, status, segment.source_name, f"{segment.page_start}-{segment.page_end}"])
+                status = "✓ 已確認文件" if segment.document_confidence >= 0.78 and not segment.manual_confirm_reason else "⚠ AI低信心待確認"
+                display = f"{'✓' if status.startswith('✓') else '⚠'} {document_label} 已讀取"
+                item = QTreeWidgetItem([display, status, segment.source_name, f"{segment.page_start}-{segment.page_end}"])
                 item.setToolTip(1, "文件已納入本案核對")
-                if segment.confidence < 0.55:
-                    item.setBackground(1, QBrush(QColor("#5B4A20")))
+                if segment.document_confidence < 0.55:
+                    item.setBackground(1, QBrush(QColor("#FFF3CD")))
             else:
-                item = QTreeWidgetItem([document_label, "✗ 待補", "-", "-"])
+                candidates = case.fallback_document_candidates.get(document_key, [])
+                if candidates:
+                    item = QTreeWidgetItem([f"⚠ 疑似 {document_label}", "AI低信心待確認", "、".join(candidates), "-"])
+                    item.setToolTip(1, "已收到疑似文件，但辨識信心不足")
+                    item.setBackground(1, QBrush(QColor("#FFF3CD")))
+                    items.append(item)
+                    continue
+                item = QTreeWidgetItem([f"✗ 缺少 {document_label}", "待補", "-", "-"])
                 item.setToolTip(1, "缺少此文件，需補件後才能完整核對")
-                item.setBackground(1, QBrush(QColor("#5A2A2A")))
+                item.setBackground(1, QBrush(QColor("#F8D7DA")))
             items.append(item)
         extra_segments = [
             segment for segment in case.documents
-            if (segment.parsed.document_type if segment.parsed else segment.detected_type).value not in required_keys
+            if self._segment_effective_type(segment).value not in required_keys
         ]
         for segment in extra_segments:
-            document_type = segment.parsed.document_type if segment.parsed else segment.detected_type
-            items.append(QTreeWidgetItem([self._document_label(document_type), "✓ 已收到", segment.source_name, f"{segment.page_start}-{segment.page_end}"]))
+            document_type = self._segment_effective_type(segment)
+            items.append(QTreeWidgetItem([f"✓ {self._document_label(document_type)} 已讀取", "已收到", segment.source_name, f"{segment.page_start}-{segment.page_end}"]))
+        return items
+
+    def _manual_review_items(self, case: CaseWorkflow) -> list[QTreeWidgetItem]:
+        items: list[QTreeWidgetItem] = []
+        high_risk_fields: list[str] = []
+        if case.audit_report:
+            for result in case.audit_report.results:
+                if result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK}:
+                    high_risk_fields.append(FIELD_LABELS.get(result.field.value, result.field.value))
+        for label in dict.fromkeys(high_risk_fields):
+            item = QTreeWidgetItem([f"⚠ {label}待人工確認", "需確認", "-", "-"])
+            item.setBackground(1, QBrush(QColor("#FFF3CD")))
+            items.append(item)
         return items
 
     def _format_case_diff(self, case: CaseWorkflow) -> str:
@@ -1386,27 +1720,27 @@ class CustomsErpWindow(QMainWindow):
         if not results:
             fallback_rows = []
             if case.missing_documents:
-                fallback_rows.extend((missing, "缺少文件", "-", "✗ 待補件") for missing in case.missing_documents)
+                fallback_rows.extend((missing, "-", "-", "-", "-", "✗ 待補件") for missing in case.missing_documents)
             if case.rule_findings:
-                fallback_rows.extend(("規則提醒", finding, "-", "⚠ 需確認") for finding in case.rule_findings)
+                fallback_rows.extend(("人工確認", "-", "-", "-", "-", self._humanize_warning(finding)) for finding in case.rule_findings)
             if not fallback_rows:
-                fallback_rows.append(("欄位核對", "目前文件不足，尚不可比對欄位", "-", "⚠ 待補件"))
+                fallback_rows.append(("欄位核對", "-", "-", "-", "-", "⚠ 文件不足，待補件"))
             table.setRowCount(len(fallback_rows))
             for row, cells in enumerate(fallback_rows):
                 for col, value in enumerate(cells):
                     item = QTableWidgetItem(value)
-                    if col == 3:
-                        item.setBackground(QBrush(QColor("#5B4A20")))
+                    if col == table.columnCount() - 1:
+                        item.setBackground(QBrush(QColor("#FFF3CD")))
                     table.setItem(row, col, item)
             table.setSortingEnabled(True)
             table.resizeColumnsToContents()
             return
         table.setRowCount(len(results))
         color_by_status = {
-            CheckStatus.MATCH: "#244E35",
-            CheckStatus.MISSING: "#5B4A20",
-            CheckStatus.MISMATCH: "#5A2A2A",
-            CheckStatus.HIGH_RISK: "#5A2A2A",
+            CheckStatus.MATCH: "#D9F2E3",
+            CheckStatus.MISSING: "#FFF3CD",
+            CheckStatus.MISMATCH: "#F8D7DA",
+            CheckStatus.HIGH_RISK: "#F8D7DA",
         }
         label_by_status = {
             CheckStatus.MATCH: "✓ 一致",
@@ -1415,32 +1749,85 @@ class CustomsErpWindow(QMainWindow):
             CheckStatus.HIGH_RISK: "⚠ 高風險",
         }
         for row, result in enumerate(results):
-            values = " | ".join(f"{name}: {value}" for name, value in result.document_values.items()) or "-"
+            by_type = self._document_values_for_field(case, result.field)
             cells = [
                 FIELD_LABELS.get(result.field.value, result.field.value),
-                values,
+                by_type.get("invoice", "-"),
+                by_type.get("packing", "-"),
+                by_type.get("bl", "-"),
                 result.declaration_value or "-",
-                label_by_status.get(result.status, result.status.value),
+                self._audit_result_label(result, label_by_status.get(result.status, result.status.value)),
             ]
             for col, value in enumerate(cells):
                 item = QTableWidgetItem(value)
                 item.setToolTip(result.message)
                 table.setItem(row, col, item)
-            status_item = table.item(row, 3)
+            status_item = table.item(row, table.columnCount() - 1)
             status_item.setToolTip(result.status.value)
             status_item.setBackground(QBrush(QColor(color_by_status.get(result.status, "#1B2530"))))
             if result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK}:
                 for col in range(table.columnCount()):
                     cell = table.item(row, col)
                     if cell:
-                        cell.setBackground(QBrush(QColor("#3A2020")))
+                        cell.setBackground(QBrush(QColor("#F8D7DA")))
             elif result.status == CheckStatus.MISSING:
                 for col in range(table.columnCount()):
                     cell = table.item(row, col)
                     if cell:
-                        cell.setBackground(QBrush(QColor("#302814")))
+                        cell.setBackground(QBrush(QColor("#FFF3CD")))
         table.setSortingEnabled(True)
         table.resizeColumnsToContents()
+
+    def _document_values_for_field(self, case: CaseWorkflow, field) -> dict[str, str]:
+        values = {"invoice": "-", "packing": "-", "bl": "-"}
+        for segment in case.documents:
+            parsed = segment.parsed
+            if not parsed:
+                continue
+            value = self._parsed_field_value(parsed, field)
+            if not value:
+                continue
+            if parsed.document_type == DocumentType.INVOICE:
+                values["invoice"] = value
+            elif parsed.document_type == DocumentType.PACKING_LIST:
+                values["packing"] = value
+            elif parsed.document_type == DocumentType.BILL_OF_LADING:
+                values["bl"] = value
+        if any(value != "-" for value in values.values()):
+            return values
+        report = case.audit_report
+        if report:
+            for result in report.results:
+                if result.field != field:
+                    continue
+                for source, value in result.document_values.items():
+                    source_key = source.casefold()
+                    if "inv" in source_key or "invoice" in source_key:
+                        values["invoice"] = value
+                    elif "pack" in source_key or "pkg" in source_key or "pl" in source_key:
+                        values["packing"] = value
+                    elif "b/l" in source_key or "bl" in source_key or "lading" in source_key:
+                        values["bl"] = value
+                break
+        return values
+
+    def _parsed_field_value(self, document: ParsedDocument, field) -> str:
+        for parsed_field in document.fields:
+            if parsed_field.name == field:
+                return str(parsed_field.value).strip()
+        return ""
+
+    def _audit_result_label(self, result, fallback: str) -> str:
+        field_label = FIELD_LABELS.get(result.field.value, result.field.value)
+        if result.status == CheckStatus.MATCH:
+            return "✓ 一致"
+        if result.status == CheckStatus.MISSING:
+            return f"✗ 缺少{field_label}資料"
+        if result.status == CheckStatus.MISMATCH:
+            return f"✗ {field_label}不一致"
+        if result.status == CheckStatus.HIGH_RISK:
+            return f"⚠ {field_label}待人工確認"
+        return fallback
 
     def _apply_compare_filters(self, view_name: str = "case") -> None:
         view = self.workflow_views.get(view_name, {})
@@ -1574,7 +1961,8 @@ class CustomsErpWindow(QMainWindow):
         parser_debug = QTextEdit()
         parser_debug.setReadOnly(True)
         parser_debug.setObjectName("DebugBox")
-        parser_debug.setPlaceholderText("Parser debug")
+        parser_debug.setPlaceholderText("文件讀取明細")
+        parser_debug.setVisible(self.settings.developer_mode)
         result_row.addWidget(diff_list)
         result_row.addWidget(parser_debug)
         layout.addLayout(result_row, 1)
@@ -1844,10 +2232,10 @@ class CustomsErpWindow(QMainWindow):
     @Slot(str, int, str)
     def _on_update_progress(self, stage: str, percent: int, message: str) -> None:
         stage_labels = {
-            "downloading": "downloading",
-            "verifying": "verifying",
-            "replacing": "replacing",
-            "restarting": "restarting",
+            "downloading": "下載新版",
+            "verifying": "驗證檔案",
+            "replacing": "安裝新版",
+            "restarting": "重新啟動",
         }
         label = stage_labels.get(stage, stage)
         self._set_update_status(label, "available")
@@ -1872,7 +2260,7 @@ class CustomsErpWindow(QMainWindow):
             remote = result.manifest.version if result.manifest else ""
             self._set_update_status(f"發現新版本 {remote}", "available")
         elif result.status == "current":
-            self._set_update_status("已是最新版本", "current")
+            self._set_update_status(f"已是最新版，最後檢查 {datetime.now().strftime('%H:%M')}", "current")
         elif result.status == "disabled":
             self._set_update_status("自動更新已停用", "neutral")
         else:
@@ -1893,9 +2281,32 @@ class CustomsErpWindow(QMainWindow):
         for widget in (self.status_dot, self.status_update):
             widget.style().unpolish(widget)
             widget.style().polish(widget)
+        self._apply_developer_mode_visibility()
+
+    def _apply_developer_mode_visibility(self) -> None:
+        developer_mode = bool(getattr(self.settings, "developer_mode", False))
+        self.status_build.setVisible(developer_mode)
+        self.updater_debug_info.setVisible(developer_mode)
+        for action_name in ("updater_debug_action", "updater_reset_action"):
+            action = getattr(self, action_name, None)
+            if isinstance(action, QAction):
+                action.setVisible(developer_mode)
+        for view in self.workflow_views.values():
+            debug = view.get("debug")
+            toggle = view.get("debug_toggle")
+            if isinstance(toggle, QPushButton):
+                toggle.setVisible(developer_mode)
+                if not developer_mode:
+                    toggle.setChecked(False)
+            if isinstance(debug, QTextEdit) and not developer_mode:
+                debug.hide()
 
     def _refresh_updater_debug_info(self, local_only: bool = False) -> None:
         self.status_build.setText(self._format_build_badge())
+        if not self.settings.developer_mode:
+            self.updater_debug_info.clear()
+            self._apply_developer_mode_visibility()
+            return
         try:
             updater = V2Updater(resolve_local_version(), self.settings.update)
             if local_only:
@@ -2104,12 +2515,16 @@ class CustomsErpWindow(QMainWindow):
         enabled.setChecked(self.settings.update.enabled)
         startup = QCheckBox("啟動時檢查更新")
         startup.setChecked(self.settings.update.check_on_startup)
+        developer_mode = QCheckBox("開發人員模式")
+        developer_mode.setChecked(self.settings.developer_mode)
+        developer_mode.setToolTip("開啟後才顯示 parser、updater SHA、EXE path、debug log 等內部資訊。")
         channel = QComboBox()
         channel.addItems(["dev", "stable"])
         channel.setCurrentText(self.settings.update.channel if self.settings.update.channel in {"dev", "stable"} else "stable")
 
         layout.addWidget(enabled)
         layout.addWidget(startup)
+        layout.addWidget(developer_mode)
         layout.addWidget(QLabel("更新 channel"))
         layout.addWidget(channel)
 
@@ -2123,8 +2538,10 @@ class CustomsErpWindow(QMainWindow):
         self.settings.update.enabled = enabled.isChecked()
         self.settings.update.check_on_startup = startup.isChecked()
         self.settings.update.channel = channel.currentText()
+        self.settings.developer_mode = developer_mode.isChecked()
         save_settings(self.settings)
         self._set_update_status("設定已儲存", "neutral")
+        self._apply_developer_mode_visibility()
         QMessageBox.information(self, "設定", "設定已儲存。")
 
     def _document_label(self, document_type: DocumentType) -> str:
@@ -2503,6 +2920,130 @@ class CustomsErpWindow(QMainWindow):
             }
             QDialog {
                 background: #121820;
+            }
+            /* Production ERP workspace overrides */
+            QMainWindow, QWidget {
+                background: #F4F6F8;
+                color: #1F2A37;
+            }
+            QMenuBar {
+                background: #FFFFFF;
+                color: #1F2A37;
+                border-bottom: 1px solid #D8DEE6;
+            }
+            QMenuBar::item:selected {
+                background: #E8EEF5;
+                color: #14213D;
+            }
+            #Sidebar {
+                background: #172235;
+                border-right: 1px solid #0F172A;
+            }
+            #Brand {
+                color: #FFFFFF;
+            }
+            #Subtitle, #SidebarNote {
+                color: #CBD5E1;
+            }
+            #PageTitle {
+                color: #14213D;
+                font-size: 25px;
+            }
+            #PanelTitle {
+                color: #1F2A37;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            #WorkflowUpload, #AuditSidePanel, #AuditWorkspace, #AuditSummaryPanel {
+                background: #FFFFFF;
+                border: 1px solid #D8DEE6;
+                border-radius: 8px;
+                padding: 12px;
+            }
+            #WorkflowUpload {
+                max-height: 140px;
+            }
+            #ResultBox, #CompareTable {
+                background: #FFFFFF;
+                border: 1px solid #D8DEE6;
+                border-radius: 6px;
+                color: #1F2A37;
+                gridline-color: #E5EAF0;
+                font-size: 15px;
+            }
+            #DocumentCards {
+                background: #FFFFFF;
+                border: 0;
+                color: #1F2A37;
+                outline: 0;
+                font-size: 15px;
+            }
+            #DocumentCards::item {
+                background: #F8FAFC;
+                border: 1px solid #D8DEE6;
+                border-radius: 8px;
+                padding: 12px;
+                margin: 0 0 8px 0;
+                min-height: 72px;
+            }
+            #DocumentCards::item:selected {
+                background: #E8F1F8;
+                border: 1px solid #2E6F8F;
+            }
+            QHeaderView::section {
+                background: #EEF2F6;
+                color: #1F2A37;
+                border: 0;
+                border-right: 1px solid #D8DEE6;
+                padding: 8px;
+                font-weight: 700;
+                font-size: 14px;
+            }
+            QTextEdit#AuditReportView {
+                background: #FFFFFF;
+                color: #1F2A37;
+                border: 1px solid #D8DEE6;
+                border-radius: 8px;
+                font-size: 16px;
+                line-height: 1.5;
+            }
+            QTextEdit#RiskSummaryCard {
+                background: #FFFBEB;
+                color: #5C3B00;
+                border: 1px solid #F3D28B;
+                border-left: 4px solid #D99822;
+                border-radius: 8px;
+                font-size: 15px;
+                line-height: 1.45;
+            }
+            QLineEdit, QComboBox {
+                background: #FFFFFF;
+                color: #1F2A37;
+                border: 1px solid #CBD5E1;
+            }
+            QCheckBox {
+                color: #1F2A37;
+            }
+            #GlobalStatusBar {
+                background: #FFFFFF;
+                border-top: 1px solid #D8DEE6;
+            }
+            #StatusChannel, #StatusVersion {
+                color: #14213D;
+            }
+            #StatusMessage {
+                color: #475569;
+            }
+            #AuditStatusBadge {
+                color: #14213D;
+                font-size: 16px;
+                font-weight: 700;
+                padding: 6px 10px;
+                background: #EEF2F6;
+                border-radius: 8px;
+            }
+            QDialog {
+                background: #FFFFFF;
             }
             """
         )

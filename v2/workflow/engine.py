@@ -7,6 +7,7 @@ from typing import Callable
 from engine.intake import IntakePipeline
 from engine.workflow import ConfidenceEngine, WorkflowStateMachine
 from v2.audit import AIAuditSummaryEngine, CustomsAuditEngine
+from v2.core.models import DocumentType
 from v2.core.runtime_log import log_exception, log_runtime
 from v2.core.settings import app_base_dir, resource_path
 from v2.parsers import ParserContext, ParserRegistry, default_parser_registry
@@ -192,8 +193,20 @@ class DocumentWorkflowEngine:
                 except Exception as parser_exc:
                     log_exception(f"parser crash source={segment.source_name}", parser_exc)
                     raise RuntimeError(f"parser crash for {segment.source_name}: {parser_exc}") from parser_exc
-                segment.detected_type = segment.parser_result.document.document_type
+                parsed_type = segment.parser_result.document.document_type
+                candidate = segment.candidates[0] if segment.candidates else None
+                if parsed_type == segment.detected_type:
+                    segment.detected_type = parsed_type
+                elif parsed_type == DocumentType.UNKNOWN:
+                    segment.detected_type = candidate.document_type if candidate else segment.detected_type
+                elif candidate and candidate.document_type != parsed_type and candidate.confidence >= segment.parser_result.confidence:
+                    segment.detected_type = candidate.document_type
+                    segment.parser_result.document.document_type = candidate.document_type
+                    segment.manual_confirm_reason = segment.manual_confirm_reason or "文件內容與解析結果不完全一致，需人工確認"
+                else:
+                    segment.detected_type = parsed_type
                 segment.confidence = max(segment.confidence, segment.parser_result.confidence)
+                segment.document_confidence = max(segment.document_confidence, candidate.confidence if candidate else 0.0)
                 segment.debug.update(segment.parser_result.debug)
                 parsed_count += 1
             emit("parser", 65, f"completed: parsed {parsed_count} segment(s)")

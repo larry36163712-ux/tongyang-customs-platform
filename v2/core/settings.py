@@ -24,6 +24,7 @@ class UpdateSettings:
 class V2Settings:
     version: str = ""
     update: UpdateSettings = field(default_factory=UpdateSettings)
+    developer_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,7 @@ def load_settings() -> V2Settings:
     version_debug_log(f"load_settings local_version={local_version} channel={channel}")
     return V2Settings(
         version=local_version,
+        developer_mode=bool(data.get("developer_mode", False)),
         update=UpdateSettings(
             enabled=bool(update_data.get("enabled", True)),
             check_on_startup=bool(update_data.get("check_on_startup", True)),
@@ -159,7 +161,7 @@ def save_settings(settings: V2Settings) -> None:
     settings.version = resolve_local_version()
     if settings.update.channel not in {"dev", "stable"}:
         settings.update.channel = "stable"
-    data = {"update": asdict(settings.update)}
+    data = {"update": asdict(settings.update), "developer_mode": bool(settings.developer_mode)}
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

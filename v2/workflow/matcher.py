@@ -85,6 +85,8 @@ class WorkflowMatcher:
         for bucket, docs in buckets.items():
             case_id = self._case_id(keys_by_bucket.get(bucket, {}), docs)
             missing = self._missing_documents(docs, direction)
+            candidates = self._fallback_candidates(docs, direction)
+            manual_queue = self._manual_confirm_queue(docs, candidates)
             status = CaseStatus.MISSING_DOCUMENTS if missing else CaseStatus.PENDING
             score = max(scores_by_bucket.get(bucket, [0.0]))
             confidence = self._confidence_label(score, len(docs))
@@ -96,6 +98,8 @@ class WorkflowMatcher:
                     documents=docs,
                     match_keys=keys_by_bucket.get(bucket, {}),
                     missing_documents=missing,
+                    manual_confirm_queue=manual_queue,
+                    fallback_document_candidates=candidates,
                     grouping_confidence=confidence,
                     grouping_score=score,
                     grouping_reasons=self._dedupe(reasons_by_bucket.get(bucket, []))[:8],
@@ -161,6 +165,10 @@ class WorkflowMatcher:
             score = max(score, 0.68)
             reasons.append("same source file")
 
+        if score < 0.6 and self._complementary_customs_documents(left_segment, right_segment):
+            score = max(score, 0.62)
+            reasons.append("customs document set candidate")
+
         confidence = self._confidence_label(score, 2)
         return MatchDecision(score=score, confidence=confidence, reasons=self._dedupe(reasons))
 
@@ -185,12 +193,68 @@ class WorkflowMatcher:
         return f"CASE-{digest.upper()}"
 
     def _missing_documents(self, docs: list[DocumentSegment], direction: str) -> list[str]:
-        present = {doc.parsed.document_type for doc in docs if doc.parsed}
+        present = {self._effective_document_type(doc) for doc in docs if self._effective_document_type(doc) != DocumentType.UNKNOWN}
         required = EXPORT_REQUIRED_TYPES if direction == "export" else IMPORT_REQUIRED_TYPES
         if direction == "export" and DocumentType.SHIPPING_ORDER in present:
             required = set(required)
             required.discard(DocumentType.BOOKING)
-        return [document_type.value for document_type in required if document_type not in present]
+        candidate_present = {
+            candidate.document_type
+            for doc in docs
+            for candidate in doc.candidates
+            if candidate.confidence >= 0.42 and candidate.document_type != DocumentType.UNKNOWN
+        }
+        return [document_type.value for document_type in required if document_type not in present and document_type not in candidate_present]
+
+    def _fallback_candidates(self, docs: list[DocumentSegment], direction: str) -> dict[str, list[str]]:
+        required = EXPORT_REQUIRED_TYPES if direction == "export" else IMPORT_REQUIRED_TYPES
+        result: dict[str, list[str]] = {}
+        for document_type in required:
+            names = [
+                f"{doc.source_name} ({int(candidate.confidence * 100)}%)"
+                for doc in docs
+                for candidate in doc.candidates
+                if candidate.document_type == document_type and candidate.confidence >= 0.42 and candidate.needs_manual_confirm
+            ]
+            if names:
+                result[document_type.value] = names
+        return result
+
+    def _manual_confirm_queue(self, docs: list[DocumentSegment], candidates: dict[str, list[str]]) -> list[str]:
+        queue: list[str] = []
+        for document_label, names in candidates.items():
+            queue.append(f"疑似 {document_label}：{', '.join(names)}")
+        for doc in docs:
+            if doc.manual_confirm_reason:
+                best = doc.candidates[0] if doc.candidates else None
+                label = best.document_type.value if best else doc.detected_type.value
+                queue.append(f"疑似 {label}：{doc.source_name}，{doc.manual_confirm_reason}")
+        return self._dedupe(queue)
+
+    def _effective_document_type(self, doc: DocumentSegment) -> DocumentType:
+        if doc.parsed and doc.parsed.document_type != DocumentType.UNKNOWN:
+            return doc.parsed.document_type
+        if doc.detected_type != DocumentType.UNKNOWN:
+            return doc.detected_type
+        if doc.candidates:
+            best = doc.candidates[0]
+            if best.confidence >= 0.42:
+                return best.document_type
+        return DocumentType.UNKNOWN
+
+    def _complementary_customs_documents(self, left: DocumentSegment, right: DocumentSegment) -> bool:
+        left_type = self._effective_document_type(left)
+        right_type = self._effective_document_type(right)
+        useful = {
+            DocumentType.INVOICE,
+            DocumentType.PACKING_LIST,
+            DocumentType.BILL_OF_LADING,
+            DocumentType.DS2_DECLARATION,
+            DocumentType.EXPORT_DECLARATION,
+            DocumentType.BOOKING,
+            DocumentType.SHIPPING_ORDER,
+        }
+        return left_type in useful and right_type in useful and left_type != right_type
 
     def _field(self, document: ParsedDocument, field: CanonicalField) -> str:
         for parsed in document.fields:

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from v2.core.models import DocumentCheckReport, DocumentType, ParsedDocument
+from v2.core.document_understanding import DocumentCandidate
 from v2.parsers.base import ParserResult
 
 
@@ -42,6 +43,9 @@ class DocumentSegment:
     text: str
     detected_type: DocumentType
     confidence: float
+    document_confidence: float = 0.0
+    candidates: list[DocumentCandidate] = field(default_factory=list)
+    manual_confirm_reason: str = ""
     parser_result: ParserResult | None = None
     debug: dict[str, object] = field(default_factory=dict)
 
@@ -61,6 +65,8 @@ class CaseWorkflow:
     audit_summary: Any | None = None
     rule_findings: list[str] = field(default_factory=list)
     missing_documents: list[str] = field(default_factory=list)
+    manual_confirm_queue: list[str] = field(default_factory=list)
+    fallback_document_candidates: dict[str, list[str]] = field(default_factory=dict)
     workflow_state: str = "PENDING_MATCH"
     grouping_confidence: str = "pending_review"
     grouping_score: float = 0.0
