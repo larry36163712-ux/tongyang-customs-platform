@@ -59,26 +59,29 @@ class DocumentWorkflowEngine:
             return WorkflowPipelineError(stage, f"{type(exc).__name__}: {exc}", traceback.format_exc())
 
         try:
-            emit("Upload", 5, f"received {len(paths)} file(s)")
+            emit("Upload", 3, f"started: received {len(paths)} file(s)")
             if not paths:
                 raise ValueError("no files were provided to workflow pipeline")
+            emit("OCR", 8, "started: file intake and OCR")
             intake_files = self.intake.load_paths(paths)
             if not intake_files:
                 raise ValueError("no supported files were loaded; supported: pdf, txt, csv, tsv, xlsx, images")
-            emit("OCR", 25, f"loaded text/OCR for {len(intake_files)} file(s)")
+            emit("OCR", 35, f"completed: loaded text/OCR for {len(intake_files)} file(s)")
         except Exception as exc:
             raise fail("OCR", exc) from exc
 
         segments = []
         try:
+            emit("Document Split", 38, "started: document split")
             for intake_file in intake_files:
                 file_segments = self.splitter.split(intake_file)
                 segments.extend(file_segments)
-            emit("Document Split", 45, f"split into {len(segments)} document segment(s)")
+            emit("Document Split", 48, f"completed: split into {len(segments)} document segment(s)")
         except Exception as exc:
             raise fail("Document Split", exc) from exc
 
         try:
+            emit("parser", 50, "started: parser and type detection")
             parsed_count = 0
             for segment in segments:
                 context = ParserContext(
@@ -94,28 +97,30 @@ class DocumentWorkflowEngine:
                 segment.confidence = max(segment.confidence, segment.parser_result.confidence)
                 segment.debug.update(segment.parser_result.debug)
                 parsed_count += 1
-            emit("Type Detection", 60, f"parsed {parsed_count} segment(s)")
+            emit("parser", 65, f"completed: parsed {parsed_count} segment(s)")
         except Exception as exc:
             raise fail("parser", exc) from exc
 
         try:
+            emit("workflow grouping", 68, "started: workflow grouping")
             cases = self.matcher.group_cases(segments, direction=direction)
-            emit("Workflow Match", 76, f"grouped into {len(cases)} workflow case(s)")
+            emit("workflow grouping", 78, f"completed: grouped into {len(cases)} workflow case(s)")
         except Exception as exc:
             raise fail("workflow grouping", exc) from exc
 
         try:
+            emit("audit", 82, "started: audit engine")
             for case in cases:
                 self.audit.audit_case(case)
                 self.rules.apply(case)
                 confidence = self.confidence.assess_case(case)
                 case.workflow_state = self.state_machine.resolve(case, confidence.is_low_confidence).value
                 self.audit_summary.summarize_case(case)
-            emit("Audit", 92, f"audited {len(cases)} workflow case(s)")
+            emit("audit", 94, f"completed: audited {len(cases)} workflow case(s)")
         except Exception as exc:
             raise fail("audit", exc) from exc
 
-        emit("Completed", 100, "workflow pipeline completed")
+        emit("Completed", 100, "completed: workflow pipeline completed")
 
         return WorkflowResult(
             direction=direction,

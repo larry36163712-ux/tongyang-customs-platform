@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from html import escape
+import queue
+import threading
+import time
 import traceback
 
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
@@ -247,6 +250,15 @@ class UpdateApplyWorker(QObject):
 class WorkflowRunWorker(QObject):
     progress = Signal(str, int, str)
     finished = Signal(object)
+    STAGE_TIMEOUT_SECONDS = {
+        "Upload": 20,
+        "OCR": 90,
+        "Document Split": 45,
+        "parser": 75,
+        "workflow grouping": 45,
+        "audit": 60,
+    }
+    TOTAL_TIMEOUT_SECONDS = 240
 
     def __init__(self, paths: list[str], direction: str) -> None:
         super().__init__()
@@ -255,20 +267,72 @@ class WorkflowRunWorker(QObject):
 
     @Slot()
     def run(self) -> None:
-        try:
-            self.progress.emit("Upload", 3, f"queued {len(self.paths)} file(s)")
-            result = DocumentWorkflowEngine().process_paths(
-                self.paths,
-                direction=self.direction,
-                progress=lambda stage, percent, message: self.progress.emit(stage, percent, message),
-            )
-        except Exception as exc:
-            traceback_text = getattr(exc, "traceback_text", "") or traceback.format_exc()
-            stage = getattr(exc, "stage", "workflow pipeline")
-            message = str(exc)
-            print(f"[workflow] {stage} failed: {message}", flush=True)
-            print(traceback_text, flush=True)
-            result = WorkflowFailure(stage=stage, message=message, traceback_text=traceback_text)
+        events: queue.Queue[tuple[str, object]] = queue.Queue()
+
+        def run_pipeline() -> None:
+            try:
+                pipeline_result = DocumentWorkflowEngine().process_paths(
+                    self.paths,
+                    direction=self.direction,
+                    progress=lambda stage, percent, message: events.put(("progress", (stage, percent, message))),
+                )
+                events.put(("finished", pipeline_result))
+            except Exception as exc:
+                traceback_text = getattr(exc, "traceback_text", "") or traceback.format_exc()
+                stage = getattr(exc, "stage", "workflow pipeline")
+                message = str(exc)
+                print(f"[workflow] {stage} failed: {message}", flush=True)
+                print(traceback_text, flush=True)
+                events.put(("finished", WorkflowFailure(stage=stage, message=message, traceback_text=traceback_text)))
+
+        self.progress.emit("Upload", 3, f"started: queued {len(self.paths)} file(s)")
+        worker_thread = threading.Thread(target=run_pipeline, name="workflow-pipeline", daemon=True)
+        worker_thread.start()
+
+        result: object | None = None
+        started_at = time.monotonic()
+        last_progress_at = started_at
+        current_stage = "Upload"
+        while result is None:
+            now = time.monotonic()
+            if now - started_at > self.TOTAL_TIMEOUT_SECONDS:
+                result = WorkflowFailure(
+                    stage="workflow pipeline",
+                    message=f"timeout after {self.TOTAL_TIMEOUT_SECONDS} seconds",
+                    traceback_text="Workflow watchdog stopped waiting for the backend pipeline.",
+                )
+                self.progress.emit("workflow pipeline", 100, "timeout: workflow pipeline exceeded total timeout")
+                break
+            stage_timeout = self.STAGE_TIMEOUT_SECONDS.get(current_stage, 60)
+            if now - last_progress_at > stage_timeout:
+                result = WorkflowFailure(
+                    stage=current_stage,
+                    message=f"timeout after {stage_timeout} seconds without progress",
+                    traceback_text=(
+                        f"Workflow watchdog timeout. Stage={current_stage}; "
+                        f"elapsed_without_progress={now - last_progress_at:.1f}s"
+                    ),
+                )
+                self.progress.emit(current_stage, 100, f"timeout: {current_stage} stopped reporting progress")
+                break
+            try:
+                kind, payload = events.get(timeout=0.25)
+            except queue.Empty:
+                if not worker_thread.is_alive():
+                    result = WorkflowFailure(
+                        stage=current_stage,
+                        message="backend worker exited without returning a result",
+                        traceback_text="No result was received from workflow backend thread.",
+                    )
+                    break
+                continue
+            if kind == "progress":
+                stage, percent, message = payload  # type: ignore[misc]
+                current_stage = str(stage)
+                last_progress_at = time.monotonic()
+                self.progress.emit(str(stage), int(percent), str(message))
+            elif kind == "finished":
+                result = payload
         self.finished.emit(result)
 
 
@@ -632,6 +696,7 @@ class CustomsErpWindow(QMainWindow):
             summary.setText("等待 OCR / parser / audit 結果。")
         if isinstance(debug, QTextEdit):
             debug.clear()
+        self._reset_workflow_progress(view_name)
         self._set_workflow_progress(view_name, "Upload", 3, "workflow task queued")
 
         self.workflow_thread = QThread(self)
@@ -697,37 +762,72 @@ class CustomsErpWindow(QMainWindow):
             f"Exception log:\n{details}"
         )
 
+    def _reset_workflow_progress(self, view_name: str) -> None:
+        view = self.workflow_views.get(view_name, {})
+        for key, text in (
+            ("upload_progress", "Upload 0%"),
+            ("ocr_progress", "OCR 0%"),
+            ("workflow_progress", "流程處理 0%"),
+        ):
+            progress = view.get(key)
+            if isinstance(progress, QProgressBar):
+                progress.setValue(0)
+                progress.setFormat(text)
+        steps = view.get("status_steps")
+        if isinstance(steps, list):
+            for label in steps:
+                if isinstance(label, QLabel):
+                    label.setProperty("state", "pending")
+                    label.setToolTip("")
+                    label.style().unpolish(label)
+                    label.style().polish(label)
+
     def _set_workflow_progress(self, view_name: str, stage: str, percent: int, message: str) -> None:
         view = self.workflow_views.get(view_name, {})
         upload_progress = view.get("upload_progress")
         ocr_progress = view.get("ocr_progress")
         workflow_progress = view.get("workflow_progress")
+        percent = max(0, min(100, int(percent)))
         if isinstance(upload_progress, QProgressBar):
-            upload_value = 100 if percent >= 8 else percent
+            upload_value = 100 if percent >= 8 else int(percent * 100 / 8)
             upload_progress.setValue(upload_value)
             upload_progress.setFormat(f"Upload {upload_value}%")
         if isinstance(ocr_progress, QProgressBar):
-            ocr_value = 100 if percent >= 42 else max(0, percent - 8)
+            if percent < 8:
+                ocr_value = 0
+            elif percent >= 35:
+                ocr_value = 100
+            else:
+                ocr_value = int((percent - 8) * 100 / 27)
             ocr_progress.setValue(min(100, ocr_value))
             ocr_progress.setFormat(f"OCR {min(100, ocr_value)}%")
         if isinstance(workflow_progress, QProgressBar):
-            workflow_value = max(0, percent - 42)
+            workflow_value = 0 if percent < 35 else int((percent - 35) * 100 / 65)
             workflow_progress.setValue(min(100, workflow_value))
-            workflow_progress.setFormat("流程處理")
+            workflow_progress.setFormat(f"流程處理 {min(100, workflow_value)}%")
         steps = view.get("status_steps")
         if isinstance(steps, list):
-            active_index = -1
-            for index, label in enumerate(steps):
-                if isinstance(label, QLabel) and label.text() == stage:
-                    active_index = index
-                    break
+            stage_index = {
+                "Upload": 0,
+                "OCR": 1,
+                "Document Split": 2,
+                "parser": 2,
+                "Type Detection": 2,
+                "workflow grouping": 3,
+                "Workflow Match": 3,
+                "audit": 4,
+                "Audit": 4,
+                "Completed": 6,
+                "workflow pipeline": 6,
+            }
+            active_index = stage_index.get(stage, -1)
             if stage == "Exception":
                 active_index = len(steps) - 1
             for index, label in enumerate(steps):
                 if not isinstance(label, QLabel):
                     continue
                 state = "done" if index < active_index else "active" if index == active_index else "pending"
-                if stage == "Exception" and index == active_index:
+                if (stage == "Exception" or "failed" in message.lower() or "timeout" in message.lower()) and index == active_index:
                     state = "error"
                 label.setProperty("state", state)
                 label.setToolTip(message)
