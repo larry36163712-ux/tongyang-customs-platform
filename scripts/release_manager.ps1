@@ -41,9 +41,15 @@ function Invoke-Gh {
 
 function Get-ReleaseByTag {
     param([string]$ReleaseTag)
-    $json = & gh release view $ReleaseTag --repo $Repo --json databaseId,tagName,isPrerelease,url 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
-        return $null
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $json = & gh release view $ReleaseTag --repo $Repo --json databaseId,tagName,isPrerelease,url 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
+            return $null
+        }
+    } finally {
+        $ErrorActionPreference = $previousPreference
     }
     try {
         return $json | ConvertFrom-Json
