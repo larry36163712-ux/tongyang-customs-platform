@@ -196,12 +196,17 @@ function Assert-ReleaseAssets {
     Invoke-WebRequest -Method Head -Uri $exeAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
     Invoke-WebRequest -Method Head -Uri $manifestExeUrl -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
     $shaAsset = $release.assets | Where-Object { $_.name -eq "SHA256.txt" } | Select-Object -First 1
-    $shaText = (Invoke-WebRequest -Method Get -Uri $shaAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing).Content
-    if ($shaText -notmatch [regex]::Escape($manifest.sha256)) {
-        throw "SHA256.txt does not contain manifest sha256."
+    $shaResponse = Invoke-WebRequest -Method Get -Uri $shaAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing
+    $shaText = if ($shaResponse.Content -is [byte[]]) {
+        [Text.Encoding]::UTF8.GetString($shaResponse.Content)
+    } else {
+        [string]$shaResponse.Content
     }
-    if ($shaText -notmatch [regex]::Escape($OfficialExeName)) {
-        throw "SHA256.txt does not reference $OfficialExeName."
+    if ($shaText -notlike "*$($manifest.sha256)*") {
+        throw "SHA256.txt does not contain manifest sha256. manifest=$($manifest.sha256) sha_text=$shaText"
+    }
+    if ($shaText -notlike "*$OfficialExeName*") {
+        throw "SHA256.txt does not reference $OfficialExeName. sha_text=$shaText"
     }
 }
 
