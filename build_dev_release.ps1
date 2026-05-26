@@ -100,8 +100,8 @@ if ($Version -notmatch "^\d+\.\d+\.\d+-dev$") {
 }
 
 $tag = "v$Version"
-$localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-$assetName = $localExeName
+$localExeName = "TongYangCustomsPlatform.exe"
+$assetName = "TongYangCustomsPlatform.exe"
 $exePath = Join-Path $root "dist\$localExeName"
 $distVersionPath = Join-Path $root "dist\config\version.json"
 $distReleaseManifestPath = Join-Path $root "dist\version.json"
@@ -158,7 +158,7 @@ Invoke-Step "Sync DEV version files" {
     $manifest.notes = "DEV release $tag"
     $manifest.release_notes = "DEV release $tag"
     $manifest.minimum_supported_version = $Version
-    $manifest.exe_url = "https://github.com/$Repo/releases/download/$tag/$([Uri]::EscapeDataString($assetName))"
+    $manifest.exe_url = "https://github.com/$Repo/releases/download/$tag/$assetName"
     $manifest.download_url = "https://github.com/$Repo/releases/latest/download/$([Uri]::EscapeDataString($assetName))"
     Write-JsonFile $manifest $configVersionPath
 
@@ -202,7 +202,7 @@ Invoke-Step "Generate assets and manifests" {
         --output $distReleaseManifestPath
 
     $releaseManifest = Read-JsonFile $distReleaseManifestPath
-    $releaseManifest.exe_url = "https://github.com/$Repo/releases/download/$tag/$([Uri]::EscapeDataString($assetName))"
+    $releaseManifest.exe_url = "https://github.com/$Repo/releases/download/$tag/$assetName"
     $releaseManifest.download_url = $releaseManifest.exe_url
     Write-JsonFile $releaseManifest $distReleaseManifestPath
     New-Item -ItemType Directory -Force -Path (Split-Path $distVersionPath) | Out-Null

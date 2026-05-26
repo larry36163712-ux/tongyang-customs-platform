@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 if (-not $env:GH_TOKEN) {
     throw "GH_TOKEN is required."
 }
-$OfficialExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+$OfficialExeName = "TongYangCustomsPlatform.exe"
 if ([string]::IsNullOrWhiteSpace($AssetName)) {
     $AssetName = $OfficialExeName
 }
@@ -136,9 +136,9 @@ function Assert-ReleaseAssets {
 
     $manifest = Invoke-RestMethod -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"}
     $expectedLatestExeUrl = if ($Channel -eq "stable") {
-        "https://github.com/$Repo/releases/latest/download/$([Uri]::EscapeDataString($OfficialExeName))"
+        "https://github.com/$Repo/releases/latest/download/$OfficialExeName"
     } else {
-        "https://github.com/$Repo/releases/download/$ReleaseTag/$([Uri]::EscapeDataString($OfficialExeName))"
+        "https://github.com/$Repo/releases/download/$ReleaseTag/$OfficialExeName"
     }
     $manifestExeUrl = if ($manifest.exe_url) { $manifest.exe_url } else { $manifest.download_url }
     if ($manifestExeUrl -ne $expectedLatestExeUrl) {

@@ -36,12 +36,12 @@ def main() -> None:
 
     old_exe = Path("C:/Windows/System32/notepad.exe")
     if not old_exe.exists():
-        old_exe = DIST / "通洋報關平台.exe"
-    new_exe = DIST / "通洋報關平台.exe"
+        old_exe = DIST / "TongYangCustomsPlatform.exe"
+    new_exe = DIST / "TongYangCustomsPlatform.exe"
     if not new_exe.exists():
-        raise RuntimeError("dist/通洋報關平台.exe is required")
+        raise RuntimeError("dist/TongYangCustomsPlatform.exe is required")
 
-    current = work_dir / "通洋報關平台.exe"
+    current = work_dir / "TongYangCustomsPlatform.exe"
     update = work_dir / "AI_Customs_ERP_V2.update.exe"
     backup = work_dir / "通洋報關平台.rollback.exe"
     log = work_dir / "update-debug.log"

@@ -13,7 +13,7 @@ python -m PyInstaller --clean --noconfirm AI_Customs_ERP_V2.spec
 $distDir = Join-Path $PSScriptRoot "dist"
 $distConfigDir = Join-Path $distDir "config"
 $legacyDistVersion = Join-Path $distDir "version.json"
-$exeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+$exeName = "TongYangCustomsPlatform.exe"
 $exePath = Get-ChildItem -Path $distDir -Filter "*.exe" |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
@@ -24,6 +24,12 @@ $targetPath = Join-Path $distDir $exeName
 if ($exePath.FullName -ne $targetPath) {
     Move-Item -Force -LiteralPath $exePath.FullName -Destination $targetPath
     $exePath = Get-Item -LiteralPath $targetPath
+}
+
+$legacyExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+$legacyExePath = Join-Path $distDir $legacyExeName
+if (Test-Path -LiteralPath $legacyExePath) {
+    Remove-Item -Force -LiteralPath $legacyExePath
 }
 
 New-Item -ItemType Directory -Force -Path $distConfigDir | Out-Null

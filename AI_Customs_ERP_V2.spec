@@ -30,7 +30,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="通洋報關平台",
+    name="TongYangCustomsPlatform",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

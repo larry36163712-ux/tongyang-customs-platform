@@ -103,8 +103,7 @@ jobs:
           $version = "${{ steps.vars.outputs.version }}"
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
-          $assetName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-          $encodedAssetName = [Uri]::EscapeDataString($assetName)
+          $assetName = "TongYangCustomsPlatform.exe"
           $exePath = Join-Path "dist" $assetName
 
           if (-not (Test-Path -LiteralPath $exePath)) {
@@ -124,11 +123,11 @@ jobs:
 
           $manifest = Get-Content "dist\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
           if ($channel -eq "dev") {
-            $tagExeUrl = "https://github.com/$repo/releases/download/$tag/$encodedAssetName"
+            $tagExeUrl = "https://github.com/$repo/releases/download/$tag/$assetName"
             $manifest.exe_url = $tagExeUrl
             $manifest.download_url = $tagExeUrl
           } else {
-            $latestExeUrl = "https://github.com/$repo/releases/latest/download/$encodedAssetName"
+            $latestExeUrl = "https://github.com/$repo/releases/latest/download/$assetName"
             $manifest.exe_url = $latestExeUrl
             $manifest.download_url = $latestExeUrl
           }
@@ -193,7 +192,7 @@ jobs:
           - Channel: $channel
           - Build time: $buildTime
           - Git commit: $commit
-          - Assets: 通洋報關平台.exe, version.json, SHA256.txt
+          - Assets: TongYangCustomsPlatform.exe, version.json, SHA256.txt
           - Release lifecycle: build, manifest generation, SHA256 generation, upload, verify, cleanup
           "@ | Set-Content "dist\release-notes.md" -Encoding UTF8
 
@@ -205,7 +204,7 @@ jobs:
           $repo = "${{ github.repository }}"
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
-          $assetName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+          $assetName = "TongYangCustomsPlatform.exe"
           $exePath = Join-Path "dist" $assetName
 
           git config user.name "github-actions[bot]"
@@ -231,10 +230,10 @@ jobs:
           $channel = "${{ steps.vars.outputs.channel }}"
           if ($channel -eq "stable") {
             $manifestUrl = "https://github.com/$repo/releases/latest/download/version.json"
-            $exeUrl = "https://github.com/$repo/releases/latest/download/$([Uri]::EscapeDataString('通洋報關平台.exe'))"
+            $exeUrl = "https://github.com/$repo/releases/latest/download/TongYangCustomsPlatform.exe"
           } else {
             $manifestUrl = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
-            $exeUrl = "https://github.com/$repo/releases/download/$tag/$([Uri]::EscapeDataString('通洋報關平台.exe'))"
+            $exeUrl = "https://github.com/$repo/releases/download/$tag/TongYangCustomsPlatform.exe"
           }
 
           $manifestResponse = Invoke-WebRequest -Method Get -Uri $manifestUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
