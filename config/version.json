@@ -4,9 +4,9 @@
   "channel": "dev",
   "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/TongYangCustomsPlatform.exe",
   "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/TongYangCustomsPlatform.exe",
-  "sha256": "8fc05664ad2380b250dbf0c42d1df34c6496118f30a88a50dfe8cadde04fc220",
-  "build_id": "1.1.2-dev-8fc05664ad23",
-  "build_time": "2026-05-26T03:40:57+00:00",
+  "sha256": "001f2fa6db2777486dd1c3bb18047d74f7608f50242b34e4035381a9e420590f",
+  "build_id": "1.1.2-dev-001f2fa6db27",
+  "build_time": "2026-05-26T03:46:18+00:00",
   "release_notes": "DEV release v1.1.2-dev",
   "notes": "DEV release v1.1.2-dev",
   "minimum_supported_version": "1.1.2-dev"
