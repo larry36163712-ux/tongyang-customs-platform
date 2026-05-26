@@ -38,6 +38,14 @@ jobs:
           $keepDevTag = "${{ inputs.keep_dev_tag }}"
 
           $releases = @(gh release list --repo $repo --limit 200 --json tagName,publishedAt,isPrerelease | ConvertFrom-Json)
+          $latest = gh api "repos/$repo/releases/latest" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Cleanup safety failed to resolve /releases/latest." }
+          $latestTag = [string]$latest.tag_name
+          if ($latest.prerelease -or $latestTag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Cleanup safety refused to continue: /releases/latest is not stable ($latestTag)."
+          }
+          python scripts\release_contract.py --repo $repo --tag $latestTag --channel stable --token $env:GH_TOKEN --require-latest
+
           $devReleases = @($releases | Where-Object {
             ([string]$_.tagName) -match '^DEV-' -or ([string]$_.tagName) -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
           } | Sort-Object publishedAt -Descending)
@@ -48,6 +56,7 @@ jobs:
           foreach ($release in $devReleases) {
             $name = [string]$release.tagName
             if ($name -ne $keepDevTag) {
+              if ($name -eq $latestTag) { throw "Cleanup safety refused to delete /releases/latest tag: $name" }
               Write-Host "Deleting old DEV release and tag: $name"
               gh release delete $name --repo $repo --yes --cleanup-tag
               if ($LASTEXITCODE -ne 0) { throw "Failed to delete old DEV release: $name" }
@@ -58,9 +67,13 @@ jobs:
             ([string]$_.tagName) -match '^v\d+\.\d+\.\d+$' -and -not $_.isPrerelease
           } | Sort-Object publishedAt -Descending)
           $stableKeep = @($stableReleases | Select-Object -First 3 | ForEach-Object { [string]$_.tagName })
+          if ($stableKeep -notcontains $latestTag) {
+            $stableKeep += $latestTag
+          }
           foreach ($release in $stableReleases) {
             $name = [string]$release.tagName
             if ($stableKeep -notcontains $name) {
+              if ($name -eq $latestTag) { throw "Cleanup safety refused to delete latest stable release: $name" }
               Write-Host "Deleting old stable release and tag: $name"
               gh release delete $name --repo $repo --yes --cleanup-tag
               if ($LASTEXITCODE -ne 0) { throw "Failed to delete old stable release: $name" }
@@ -73,6 +86,7 @@ jobs:
             $name = $ref -replace '^refs/tags/', ''
             $isManagedTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+(-dev(\.\d+)?)?$'
             if ($isManagedTag -and $releaseTags -notcontains $name) {
+              if ($name -eq $latestTag) { throw "Cleanup safety refused to delete current updater tag: $name" }
               Write-Host "Deleting orphan tag: $name"
               gh api --method DELETE "repos/$repo/git/refs/tags/$name" | Out-Null
               if ($LASTEXITCODE -ne 0) { throw "Failed to delete orphan tag: $name" }

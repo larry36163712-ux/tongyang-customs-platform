@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 import v2.core.settings as settings_module
 import v2.core.updater as updater_module
 from v2.core.settings import UpdateSettings
-from v2.core.updater import V2Updater
+from v2.core.updater import V2Updater, _compare_versions
 
 
 def main() -> None:
@@ -59,17 +59,21 @@ def main() -> None:
             raise RuntimeError("equal versions must not show update popup")
 
         log_text = (logs / "update-debug.log").read_text(encoding="utf-8")
+        updater_log_text = (logs / "updater.log").read_text(encoding="utf-8")
         required = [
             f"local_version_path={local_manifest}",
             "local_version=1.0.2",
             "remote_version=1.0.2",
-            "compare result=0",
+            "compare_result=0",
             "sha_changed=False",
             "update result=current same_version_same_build should_show_popup=False",
         ]
         missing = [item for item in required if item not in log_text]
         if missing:
             raise RuntimeError(f"debug log missing: {missing}")
+        missing = [item for item in required if item not in updater_log_text]
+        if missing:
+            raise RuntimeError(f"updater log missing: {missing}")
         version_log = (logs / "version_debug.log").read_text(encoding="utf-8")
         for item in (
             f"version_json_path={local_manifest}",
@@ -83,8 +87,11 @@ def main() -> None:
         newer = updater_module.UpdateManifest("1.0.3", "local", "abc", "stable")
         updater._load_manifest = lambda: newer  # type: ignore[method-assign]
         newer_result = updater.check()
-        if not newer_result.should_show_popup:
-            raise RuntimeError("remote newer version should show update popup")
+        if newer_result.should_show_popup:
+            raise RuntimeError("remote newer version with same local sha must not show update popup")
+        finalized_same_sha = json.loads(local_manifest.read_text(encoding="utf-8"))
+        if finalized_same_sha["version"] != "1.0.3":
+            raise RuntimeError("same sha newer version should sync local manifest")
 
         older = updater_module.UpdateManifest("1.0.1", "local", "abc", "stable")
         updater._load_manifest = lambda: older  # type: ignore[method-assign]
@@ -92,11 +99,85 @@ def main() -> None:
         if older_result.should_show_popup:
             raise RuntimeError("remote older version must not show update popup")
 
+        local_manifest.write_text(
+            json.dumps({"version": "1.0.2", "download_url": "local", "sha256": "abc", "channel": "stable"}, indent=2),
+            encoding="utf-8",
+        )
         same_version_new_sha = updater_module.UpdateManifest("1.0.2", "local", "def", "stable")
         updater._load_manifest = lambda: same_version_new_sha  # type: ignore[method-assign]
         same_version_new_sha_result = updater.check()
         if same_version_new_sha_result.status != "available" or not same_version_new_sha_result.should_show_popup:
             raise RuntimeError("same version with different remote sha256 should update")
+
+        local_manifest.write_text(
+            json.dumps({"version": "1.0.2", "download_url": "local", "sha256": "def", "channel": "stable"}, indent=2),
+            encoding="utf-8",
+        )
+        pending = config / "version.pending.json"
+        pending.write_text(
+            json.dumps(
+                {
+                    "version": "1.0.3",
+                    "download_url": "local",
+                    "sha256": "def",
+                    "channel": "stable",
+                    "build_id": "1.0.3-def",
+                    "build_time": "2026-05-26T00:00:00+00:00",
+                    "exe_url": "local",
+                    "release_notes": "test",
+                    "minimum_supported_version": "1.0.0",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        updater._load_manifest = lambda: updater_module.UpdateManifest("1.0.3", "local", "def", "stable")  # type: ignore[method-assign]
+        pending_result = updater.check()
+        if pending_result.status != "current" or pending_result.should_show_popup:
+            raise RuntimeError("pending finalized update must not show update popup after restart")
+        finalized = json.loads(local_manifest.read_text(encoding="utf-8"))
+        if finalized["version"] != "1.0.3":
+            raise RuntimeError("pending manifest was not finalized into local version.json")
+        if pending.exists():
+            raise RuntimeError("pending manifest was not cleaned up")
+
+        if _compare_versions("v1.2.3", "1.2.3") != 0:
+            raise RuntimeError("v prefix must be normalized")
+        if _compare_versions("refs/tags/v1.2.4", "1.2.3") <= 0:
+            raise RuntimeError("release tag version normalization failed")
+
+        debug = updater.debug_state()
+        for key in ("executable_path", "local_version", "local_sha", "remote_version", "remote_sha", "pending_sha", "update_state", "finalize_state", "cache_state"):
+            if key not in debug:
+                raise RuntimeError(f"debug state missing: {key}")
+
+        dirty_files = [
+            config / "pending_update.json",
+            config / "update_state.json",
+            config / "local_manifest.json",
+            config / "updater_cache.json",
+            config / "sha_cache.json",
+            config / "stale_sha_cache.json",
+        ]
+        for path in dirty_files:
+            path.write_text("dirty", encoding="utf-8")
+        cache_dir = config / "updater_cache"
+        temp_update_dir = config / "temp_update"
+        cache_dir.mkdir(exist_ok=True)
+        temp_update_dir.mkdir(exist_ok=True)
+        (cache_dir / "github.json").write_text("dirty", encoding="utf-8")
+        (temp_update_dir / "old.exe").write_text("dirty", encoding="utf-8")
+        updater._load_manifest = lambda: updater_module.UpdateManifest("1.0.3", "local", "def", "stable")  # type: ignore[method-assign]
+        reset_state = updater.reset_state()
+        if reset_state.get("update_state") != "current_sha_match":
+            raise RuntimeError(f"reset should be current by sha, got {reset_state.get('update_state')}")
+        if reset_state.get("local_version") != "1.0.3" or reset_state.get("local_sha") != "def":
+            raise RuntimeError("reset did not rebuild a clean synced manifest")
+        for path in dirty_files:
+            if path.exists():
+                raise RuntimeError(f"dirty updater state was not removed: {path}")
+        if cache_dir.exists() or temp_update_dir.exists():
+            raise RuntimeError("dirty updater cache directories were not removed")
 
         dev_called = False
         dev_updater = V2Updater("0.0.0", UpdateSettings(enabled=True, channel="dev"))

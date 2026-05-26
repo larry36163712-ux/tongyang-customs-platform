@@ -28,6 +28,7 @@ def main() -> None:
     encoded_name = quote(asset_name)
     build_time = args.build_time or datetime.now(timezone.utc).isoformat(timespec="seconds")
     build_id = f"{args.version.lstrip('v')}-{digest[:12]}"
+    release_id = args.tag
     exe_url = f"https://github.com/{args.repo}/releases/latest/download/{encoded_name}"
     release_notes = args.release_notes or f"{args.channel.title()} release {args.tag}"
     minimum_supported_version = args.minimum_supported_version or args.version.lstrip("v")
@@ -40,6 +41,7 @@ def main() -> None:
         "sha256": digest,
         "build_id": build_id,
         "build_time": build_time,
+        "release_id": release_id,
         "release_notes": release_notes,
         "notes": release_notes,
         "minimum_supported_version": minimum_supported_version,

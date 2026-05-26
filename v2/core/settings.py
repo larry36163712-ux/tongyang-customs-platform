@@ -26,10 +26,34 @@ class V2Settings:
     update: UpdateSettings = field(default_factory=UpdateSettings)
 
 
+@dataclass(frozen=True)
+class BuildInfo:
+    version: str = ""
+    channel: str = ""
+    build_id: str = ""
+    build_time: str = ""
+    release_id: str = ""
+    sha256: str = ""
+
+
 def app_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path.cwd()
+
+
+def bundled_base_dir() -> Path:
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        return Path(meipass)
+    return app_base_dir()
+
+
+def resource_path(*parts: str) -> Path:
+    external = app_base_dir().joinpath(*parts)
+    if external.exists():
+        return external
+    return bundled_base_dir().joinpath(*parts)
 
 
 def settings_path() -> Path:
@@ -74,6 +98,18 @@ def read_local_manifest() -> dict:
         version_debug_log("local manifest invalid type")
         return {}
     return data
+
+
+def read_build_info() -> BuildInfo:
+    data = read_local_manifest()
+    return BuildInfo(
+        version=str(data.get("version", "")).strip(),
+        channel=str(data.get("channel", "")).strip(),
+        build_id=str(data.get("build_id", "")).strip(),
+        build_time=str(data.get("build_time", "")).strip(),
+        release_id=str(data.get("release_id") or data.get("build_id", "")).strip(),
+        sha256=str(data.get("sha256", "")).strip().lower(),
+    )
 
 
 def load_settings() -> V2Settings:

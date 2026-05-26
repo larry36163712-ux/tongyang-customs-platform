@@ -20,6 +20,8 @@ class DocumentType(str, Enum):
     BOOKING_CONFIRMATION = "BOOKING_CONFIRMATION"
     EXPORT_DECLARATION = "出口報單"
     PACKING_DETAIL = "裝箱明細"
+    TAX_SHEET = "稅單"
+    IMAGE_SCAN = "JPG 掃描件"
     UNKNOWN = "未分類"
 
 
@@ -42,6 +44,9 @@ class CanonicalField(str, Enum):
     VOYAGE = "voyage"
     BOOKING_NO = "booking_no"
     SHIPPING_ORDER_NO = "shipping_order_no"
+    DECLARATION_NO = "declaration_no"
+    INVOICE_NO = "invoice_no"
+    BL_NO = "bl_no"
     POL = "pol"
     POD = "pod"
     ETD = "etd"
@@ -53,6 +58,15 @@ class CanonicalField(str, Enum):
     ORIGIN = "origin"
     CUSTOMER = "customer"
     SUPPLIER = "supplier"
+    INCOTERM = "incoterm"
+    CIF = "cif"
+    FOB = "fob"
+    FREIGHT = "freight"
+    INSURANCE = "insurance"
+    EXCHANGE_RATE = "exchange_rate"
+    STATISTICAL_METHOD = "statistical_method"
+    DUTY_AMOUNT = "duty_amount"
+    CLOSING_DATE = "closing_date"
 
 
 class CheckStatus(str, Enum):

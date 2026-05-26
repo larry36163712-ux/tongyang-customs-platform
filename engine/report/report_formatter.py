@@ -29,7 +29,7 @@ class ReportFormatter:
         self.section_renderer = section_renderer or SectionRenderer()
 
     def format(self, report: AuditNarrativeReport) -> str:
-        lines = [f"AI Customs Audit Report - {report.case_id}", report.headline, ""]
+        lines = ["AI Customs Audit Report", f"案件：{report.case_id}", report.headline, ""]
         for index, section in enumerate(report.sections, 1):
             lines.extend(self.section_renderer.render(index, section))
             lines.append("")

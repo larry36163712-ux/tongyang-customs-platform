@@ -31,6 +31,9 @@ class SemanticParserEngine:
         SemanticAlias(CanonicalField.VOYAGE, ("voyage", "voy", "航次")),
         SemanticAlias(CanonicalField.BOOKING_NO, ("booking no", "booking number", "booking#", "定倉號碼", "訂艙號碼")),
         SemanticAlias(CanonicalField.SHIPPING_ORDER_NO, ("s/o no", "so no", "shipping order no", "s/o", "裝貨單號")),
+        SemanticAlias(CanonicalField.DECLARATION_NO, ("declaration no", "entry no", "報單號碼", "報單號別")),
+        SemanticAlias(CanonicalField.INVOICE_NO, ("invoice no", "invoice number", "inv no", "發票號碼", "發票編號")),
+        SemanticAlias(CanonicalField.BL_NO, ("b/l no", "bl no", "bill of lading no", "提單號碼")),
         SemanticAlias(CanonicalField.POL, ("pol", "port of loading", "loading port", "起運港", "裝貨港")),
         SemanticAlias(CanonicalField.POD, ("pod", "port of discharge", "discharge port", "目的港", "卸貨港")),
         SemanticAlias(CanonicalField.ETD, ("etd", "estimated time of departure", "開航日")),
@@ -42,19 +45,30 @@ class SemanticParserEngine:
         SemanticAlias(CanonicalField.ORIGIN, ("origin", "country of origin", "產地")),
         SemanticAlias(CanonicalField.CUSTOMER, ("customer", "buyer", "客戶", "買方")),
         SemanticAlias(CanonicalField.SUPPLIER, ("supplier", "vendor", "shipper", "供應商", "賣方")),
+        SemanticAlias(CanonicalField.INCOTERM, ("incoterm", "trade term", "貿易條件", "交易條件")),
+        SemanticAlias(CanonicalField.CIF, ("cif", "cif value", "cif amount", "完稅價格")),
+        SemanticAlias(CanonicalField.FOB, ("fob", "fob value", "fob amount", "離岸價格")),
+        SemanticAlias(CanonicalField.FREIGHT, ("freight", "ocean freight", "運費")),
+        SemanticAlias(CanonicalField.INSURANCE, ("insurance", "ins", "保費", "保險費")),
+        SemanticAlias(CanonicalField.EXCHANGE_RATE, ("exchange rate", "ex rate", "rate", "匯率")),
+        SemanticAlias(CanonicalField.STATISTICAL_METHOD, ("statistical method", "stat method", "統計方式", "統計單位")),
+        SemanticAlias(CanonicalField.DUTY_AMOUNT, ("duty", "tax", "duty amount", "稅額", "進口稅")),
+        SemanticAlias(CanonicalField.CLOSING_DATE, ("closing date", "cut off", "cutoff", "結關日")),
     )
 
     DOCUMENT_TERMS: tuple[tuple[DocumentType, tuple[str, ...]], ...] = (
         (DocumentType.EXPORT_DECLARATION, ("export declaration", "出口報單")),
         (DocumentType.DS2_DECLARATION, ("ds2", "進口報單", "海關報單")),
-        (DocumentType.INVOICE, ("invoice", "commercial invoice", "inv")),
-        (DocumentType.PACKING_LIST, ("packing list", "pkg", "p/l")),
         (DocumentType.BILL_OF_LADING, ("bill of lading", "b/l", "bl no")),
+        (DocumentType.PACKING_LIST, ("packing list", "pkg", "p/l")),
+        (DocumentType.INVOICE, ("commercial invoice", "invoice")),
         (DocumentType.ARRIVAL_NOTICE, ("arrival notice", "到貨通知")),
         (DocumentType.CLEARANCE_LIST, ("清表",)),
         (DocumentType.DATA_CLEARANCE, ("資料清表",)),
         (DocumentType.MATERIAL_CLEARANCE, ("用料清表",)),
         (DocumentType.DRAWBACK_CLEARANCE, ("核退清表",)),
+        (DocumentType.TAX_SHEET, ("稅單", "duty memo", "tax sheet")),
+        (DocumentType.IMAGE_SCAN, ("jpg 掃描件", "image scan")),
         (DocumentType.BOOKING_CONFIRMATION, ("booking confirmation",)),
         (DocumentType.SHIPPING_ORDER, ("shipping order", "s/o", "s.o.")),
         (DocumentType.BOOKING, ("booking", "booking no", "booking number", "定倉單", "訂艙單")),
@@ -63,10 +77,24 @@ class SemanticParserEngine:
 
     def classify_document(self, text: str) -> DocumentType:
         normalized = text.casefold()
+        header = "\n".join(line.strip() for line in text.splitlines()[:8]).casefold()
+        first_line = next((line.strip().casefold() for line in text.splitlines() if line.strip()), "")
+        scores: list[tuple[float, DocumentType]] = []
         for document_type, terms in self.DOCUMENT_TERMS:
-            if any(term.casefold() in normalized for term in terms):
-                return document_type
-        return DocumentType.UNKNOWN
+            score = 0.0
+            for term in terms:
+                needle = term.casefold()
+                if needle and needle in first_line:
+                    score += 1.0
+                if needle and needle in header:
+                    score += 0.45
+                if needle and needle in normalized:
+                    score += 0.15
+            if score:
+                scores.append((score, document_type))
+        if not scores:
+            return DocumentType.UNKNOWN
+        return max(scores, key=lambda item: item[0])[1]
 
     def map_label(self, label: str) -> CanonicalField | None:
         normalized = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", label).strip().casefold()
@@ -118,11 +146,11 @@ class SemanticParserEngine:
                 label, value = match.group(1), match.group(2)
 
         if not label:
-            return self._detect_inline_field(raw)
+            return self._detect_inline_field(raw) or self._detect_identifier_field(raw)
 
         canonical = self.map_label(label)
         if not canonical:
-            return None
+            return self._detect_identifier_field(raw)
         return ParsedField(canonical, label.strip(), value.strip(), 0.78, raw)
 
     def _detect_inline_field(self, line: str) -> ParsedField | None:
@@ -134,4 +162,23 @@ class SemanticParserEngine:
                 value = re.sub(re.escape(term), "", line, count=1, flags=re.IGNORECASE).strip(" :-：")
                 if value:
                     return ParsedField(alias.canonical, term, value, 0.62, line)
+        return None
+
+    def _detect_identifier_field(self, line: str) -> ParsedField | None:
+        patterns = (
+            (CanonicalField.INVOICE_NO, r"\b(?:invoice|inv)\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Z0-9\-\/]+)"),
+            (CanonicalField.DECLARATION_NO, r"\b(?:declaration|entry)\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Z0-9\-\/]+)"),
+            (CanonicalField.BL_NO, r"\b(?:b/l|bl|bill of lading)\s*(?:no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9\-\/]+)"),
+            (CanonicalField.BOOKING_NO, r"\b(?:booking|bkg)\s*(?:no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9\-\/]+)"),
+            (CanonicalField.SHIPPING_ORDER_NO, r"\b(?:s/o|so|shipping order)\s*(?:no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9\-\/]+)"),
+            (CanonicalField.CONTAINER_NO, r"\b([A-Z]{4}\s*\d{7})\b"),
+            (CanonicalField.INCOTERM, r"\b(FOB|CIF|CFR|CNF|EXW|DAP|DDP)\b"),
+            (CanonicalField.EXCHANGE_RATE, r"(?:exchange\s*rate|ex\s*rate|匯率)\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)"),
+            (CanonicalField.HS_CODE, r"\b(?:hs\s*code|hscode|tariff|稅則(?:號別)?)\s*[:：]?\s*([0-9.\-]{6,14})"),
+            (CanonicalField.SEAL_NO, r"\b(?:seal)\s*(?:no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9\-\/]+)"),
+        )
+        for field, pattern in patterns:
+            match = re.search(pattern, line, flags=re.IGNORECASE)
+            if match:
+                return ParsedField(field, field.value, match.group(1).strip(), 0.72, line)
         return None

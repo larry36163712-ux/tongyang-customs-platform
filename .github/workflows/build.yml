@@ -45,7 +45,7 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
-          python -m py_compile v2\ui\main_window.py v2\core\updater.py scripts\make_release_manifest.py
+          python -m py_compile v2\ui\main_window.py v2\core\updater.py scripts\make_release_manifest.py scripts\release_contract.py
           python scripts\test_v2_document_workflow.py
           python scripts\test_v2_declaration_workflow.py
           python scripts\test_v2_updater_version_source.py
@@ -74,6 +74,19 @@ jobs:
             --release-notes "$($channel.ToUpper()) build $tag" `
             --minimum-supported-version $version `
             --output "dist\version.json"
+
+          if ($channel -eq "dev") {
+            $manifest = Get-Content "dist\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+            $manifest.exe_url = "https://github.com/$repo/releases/download/$tag/$assetName"
+            $manifest.download_url = $manifest.exe_url
+            $manifest | ConvertTo-Json -Depth 30 | Set-Content "dist\version.json" -Encoding UTF8
+          }
+          python scripts\release_contract.py `
+            --mode manifest `
+            --repo $repo `
+            --tag $tag `
+            --channel $channel `
+            --manifest "dist\version.json"
 
           Copy-Item -LiteralPath "dist\version.json" -Destination "dist\config\version.json" -Force
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()

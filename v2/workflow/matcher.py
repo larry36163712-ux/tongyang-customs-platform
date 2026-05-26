@@ -119,6 +119,8 @@ class WorkflowMatcher:
             keys["consignee"] = self._field(document, CanonicalField.CUSTOMER)
             keys["shipper"] = self._field(document, CanonicalField.SUPPLIER)
             keys["amount"] = self._field(document, CanonicalField.AMOUNT)
+            keys["invoice_no"] = keys.get("invoice_no") or self._field(document, CanonicalField.INVOICE_NO)
+            keys["bl_no"] = keys.get("bl_no") or self._field(document, CanonicalField.BL_NO)
             keys["booking_no"] = keys.get("booking_no") or self._field(document, CanonicalField.BOOKING_NO)
             keys["shipping_order_no"] = keys.get("shipping_order_no") or self._field(document, CanonicalField.SHIPPING_ORDER_NO)
             keys["vessel_voyage"] = keys.get("vessel_voyage") or self._field(document, CanonicalField.VESSEL_VOYAGE)

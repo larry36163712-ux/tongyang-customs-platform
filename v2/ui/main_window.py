@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 import queue
+import sys
 import threading
 import time
 import traceback
@@ -50,7 +51,8 @@ from v2.core.ds2_gateway import Ds2Gateway
 from v2.core.models import CheckStatus, DocumentType, ParsedDocument
 from v2.core.parser_engine import SemanticParserEngine
 from v2.core.print_workflow import RELEASE_METHODS, ImportPrintWorkflow
-from v2.core.settings import V2Settings, load_settings, logs_dir, resolve_local_version, save_settings, version_debug_log
+from v2.core.runtime_log import log_exception, log_runtime
+from v2.core.settings import V2Settings, load_settings, logs_dir, read_build_info, resolve_local_version, save_settings, version_debug_log
 from v2.core.template_learning import CustomerTemplateLearningService
 from v2.core.updater import UpdateCheck, V2Updater
 from v2.workflow import CaseWorkflow, DocumentWorkflowEngine, WorkflowResult
@@ -95,6 +97,19 @@ FIELD_LABELS = {
     "origin": "產地",
     "customer": "客戶",
     "supplier": "供應商",
+    "declaration_no": "報單號碼",
+    "invoice_no": "INV NO",
+    "bl_no": "BL NO",
+    "booking_no": "Booking NO",
+    "incoterm": "Incoterm",
+    "cif": "CIF",
+    "fob": "FOB",
+    "freight": "運費",
+    "insurance": "保費",
+    "exchange_rate": "匯率",
+    "statistical_method": "統計方式",
+    "duty_amount": "稅額",
+    "closing_date": "結關日",
 }
 
 
@@ -260,32 +275,51 @@ class WorkflowRunWorker(QObject):
     }
     TOTAL_TIMEOUT_SECONDS = 240
 
-    def __init__(self, paths: list[str], direction: str) -> None:
+    def __init__(self, paths: list[str], direction: str, intake_mode: str = "files") -> None:
         super().__init__()
         self.paths = paths
         self.direction = direction
+        self.intake_mode = intake_mode
 
     @Slot()
     def run(self) -> None:
+        log_runtime(
+            f"workflow worker run start mode={self.intake_mode} direction={self.direction} "
+            f"path_count={len(self.paths)} thread={threading.current_thread().name}"
+        )
         events: queue.Queue[tuple[str, object]] = queue.Queue()
 
         def run_pipeline() -> None:
             try:
-                pipeline_result = DocumentWorkflowEngine().process_paths(
-                    self.paths,
-                    direction=self.direction,
-                    progress=lambda stage, percent, message: events.put(("progress", (stage, percent, message))),
-                )
+                log_runtime("workflow backend thread start")
+                engine = DocumentWorkflowEngine()
+                if self.intake_mode == "folder":
+                    if not self.paths:
+                        raise ValueError("no folder was provided to workflow pipeline")
+                    pipeline_result = engine.process_folder(
+                        self.paths[0],
+                        direction=self.direction,
+                        progress=lambda stage, percent, message: events.put(("progress", (stage, percent, message))),
+                    )
+                else:
+                    pipeline_result = engine.process_paths(
+                        self.paths,
+                        direction=self.direction,
+                        progress=lambda stage, percent, message: events.put(("progress", (stage, percent, message))),
+                    )
                 events.put(("finished", pipeline_result))
+                log_runtime("workflow backend thread finished successfully")
             except Exception as exc:
                 traceback_text = getattr(exc, "traceback_text", "") or traceback.format_exc()
                 stage = getattr(exc, "stage", "workflow pipeline")
                 message = str(exc)
+                log_exception(f"workflow backend failed stage={stage}", exc)
                 print(f"[workflow] {stage} failed: {message}", flush=True)
                 print(traceback_text, flush=True)
                 events.put(("finished", WorkflowFailure(stage=stage, message=message, traceback_text=traceback_text)))
 
-        self.progress.emit("Upload", 3, f"started: queued {len(self.paths)} file(s)")
+        queued_label = "folder" if self.intake_mode == "folder" else "file(s)"
+        self.progress.emit("Upload", 3, f"started: queued {len(self.paths)} {queued_label}")
         worker_thread = threading.Thread(target=run_pipeline, name="workflow-pipeline", daemon=True)
         worker_thread.start()
 
@@ -296,21 +330,28 @@ class WorkflowRunWorker(QObject):
         while result is None:
             now = time.monotonic()
             if now - started_at > self.TOTAL_TIMEOUT_SECONDS:
+                dump = self._thread_dump(worker_thread)
+                log_runtime(f"workflow total timeout thread_alive={worker_thread.is_alive()}\n{dump}")
                 result = WorkflowFailure(
                     stage="workflow pipeline",
                     message=f"timeout after {self.TOTAL_TIMEOUT_SECONDS} seconds",
-                    traceback_text="Workflow watchdog stopped waiting for the backend pipeline.",
+                    traceback_text="Workflow watchdog stopped waiting for the backend pipeline.\n\n" + dump,
                 )
                 self.progress.emit("workflow pipeline", 100, "timeout: workflow pipeline exceeded total timeout")
                 break
             stage_timeout = self.STAGE_TIMEOUT_SECONDS.get(current_stage, 60)
             if now - last_progress_at > stage_timeout:
+                dump = self._thread_dump(worker_thread)
+                log_runtime(
+                    f"workflow stage timeout stage={current_stage} thread_alive={worker_thread.is_alive()} "
+                    f"elapsed_without_progress={now - last_progress_at:.1f}\n{dump}"
+                )
                 result = WorkflowFailure(
                     stage=current_stage,
                     message=f"timeout after {stage_timeout} seconds without progress",
                     traceback_text=(
                         f"Workflow watchdog timeout. Stage={current_stage}; "
-                        f"elapsed_without_progress={now - last_progress_at:.1f}s"
+                        f"elapsed_without_progress={now - last_progress_at:.1f}s\n\n{dump}"
                     ),
                 )
                 self.progress.emit(current_stage, 100, f"timeout: {current_stage} stopped reporting progress")
@@ -319,6 +360,7 @@ class WorkflowRunWorker(QObject):
                 kind, payload = events.get(timeout=0.25)
             except queue.Empty:
                 if not worker_thread.is_alive():
+                    log_runtime(f"workflow backend exited without result stage={current_stage}")
                     result = WorkflowFailure(
                         stage=current_stage,
                         message="backend worker exited without returning a result",
@@ -334,6 +376,15 @@ class WorkflowRunWorker(QObject):
             elif kind == "finished":
                 result = payload
         self.finished.emit(result)
+        log_runtime(f"workflow worker run finished result_type={type(result).__name__}")
+
+    def _thread_dump(self, worker_thread: threading.Thread) -> str:
+        frames = sys._current_frames()
+        frame = frames.get(worker_thread.ident or -1)
+        if frame is None:
+            return f"No Python frame for worker thread ident={worker_thread.ident}"
+        stack = "".join(traceback.format_stack(frame))
+        return f"Worker thread {worker_thread.name} ident={worker_thread.ident} stack:\n{stack}"
 
 
 class CustomsErpWindow(QMainWindow):
@@ -365,7 +416,9 @@ class CustomsErpWindow(QMainWindow):
         self.status_dot = QLabel()
         self.status_channel = QLabel()
         self.status_version = QLabel()
+        self.status_build = QLabel()
         self.status_update = QLabel()
+        self.updater_debug_info = QLabel()
         self.workflow_case_list: QListWidget | None = None
         self.workflow_tree: QTreeWidget | None = None
         self.workflow_table: QTableWidget | None = None
@@ -382,6 +435,7 @@ class CustomsErpWindow(QMainWindow):
         self._build_shell()
         self._apply_theme()
         self._set_update_status("尚未檢查更新", "neutral")
+        self._refresh_updater_debug_info(local_only=True)
 
         if self.settings.update.check_on_startup:
             QTimer.singleShot(800, self._check_updates_on_startup)
@@ -396,8 +450,14 @@ class CustomsErpWindow(QMainWindow):
         settings_action.triggered.connect(self._open_settings_dialog)
         check_update_action = QAction("檢查更新", self)
         check_update_action.triggered.connect(lambda: self._check_updates(interactive=True))
+        updater_debug_action = QAction("Updater Debug", self)
+        updater_debug_action.triggered.connect(self._open_updater_debug_dialog)
+        updater_reset_action = QAction("Reset Updater State", self)
+        updater_reset_action.triggered.connect(lambda: self._reset_updater_state(show_message=True))
         self.menuBar().addAction(settings_action)
         self.menuBar().addAction(check_update_action)
+        self.menuBar().addAction(updater_debug_action)
+        self.menuBar().addAction(updater_reset_action)
 
     def _build_shell(self) -> None:
         root = QWidget()
@@ -475,11 +535,14 @@ class CustomsErpWindow(QMainWindow):
         mode.setObjectName("WorkflowMode")
         upload_button = QPushButton("選擇文件")
         upload_button.clicked.connect(lambda: self._choose_workflow_documents(mode.currentText(), view_name))
+        folder_button = QPushButton("選擇資料夾")
+        folder_button.clicked.connect(lambda: self._choose_workflow_folder(mode.currentText(), view_name))
         header_row.addWidget(title)
         header_row.addStretch(1)
         header_row.addWidget(QLabel("流程"))
         header_row.addWidget(mode)
         header_row.addWidget(upload_button)
+        header_row.addWidget(folder_button)
         layout.addLayout(header_row)
 
         upload_panel = QFrame()
@@ -490,6 +553,7 @@ class CustomsErpWindow(QMainWindow):
         upload_list = DocumentDropList()
         upload_list.setMinimumHeight(78)
         upload_list.addItem("拖曳多份 PDF / 影像 / TXT 到這裡，或按「選擇文件」批次上傳")
+        upload_list.addItem("或按「選擇資料夾」自動掃描整批報關文件")
         upload_list.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
         upload_layout.addWidget(upload_list)
 
@@ -529,7 +593,6 @@ class CustomsErpWindow(QMainWindow):
             status_steps.append(label)
             status_layout.addWidget(label)
         status_layout.addStretch(1)
-        status_bar.hide()
 
         body = QSplitter(Qt.Orientation.Horizontal)
         body.setObjectName("AuditSplitter")
@@ -541,7 +604,6 @@ class CustomsErpWindow(QMainWindow):
         document_status_layout.setContentsMargins(10, 10, 10, 10)
         document_status_layout.setSpacing(6)
         document_status_layout.addStretch(1)
-        document_status_bar.hide()
 
         self.workflow_tree = QTreeWidget()
         self.workflow_tree.setHeaderLabels(["文件", "完整度", "文件名稱", "頁數"])
@@ -599,15 +661,17 @@ class CustomsErpWindow(QMainWindow):
         summary_layout = QVBoxLayout(summary_panel)
         summary_layout.setContentsMargins(0, 0, 0, 0)
         summary_layout.setSpacing(10)
-        summary_layout.addWidget(QLabel("異常摘要 / 高風險提示"))
+        summary_layout.addWidget(QLabel("文件與流程狀態"))
+        summary_layout.addWidget(document_status_bar)
+        summary_layout.addWidget(status_bar)
         summary_layout.addWidget(audit_summary, 1)
         self.workflow_debug.hide()
 
-        body.addWidget(audit_workspace)
         body.addWidget(summary_panel)
-        body.setStretchFactor(0, 7)
-        body.setStretchFactor(1, 3)
-        body.setSizes([980, 340])
+        body.addWidget(audit_workspace)
+        body.setStretchFactor(0, 3)
+        body.setStretchFactor(1, 7)
+        body.setSizes([340, 980])
         layout.addWidget(body, 1)
         self.workflow_views[view_name] = {
             "tree": self.workflow_tree,
@@ -646,13 +710,23 @@ class CustomsErpWindow(QMainWindow):
         self.status_channel.setObjectName("StatusChannel")
         self.status_version.setText(self.settings.version)
         self.status_version.setObjectName("StatusVersion")
+        self.status_build.setObjectName("StatusVersion")
+        self.status_build.setText(self._format_build_badge())
+        self.status_build.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status_update.setObjectName("StatusMessage")
+        self.updater_debug_info.setObjectName("UpdaterDebugInfo")
+        self.updater_debug_info.setWordWrap(True)
+        self.updater_debug_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         layout.addWidget(self.status_dot)
         layout.addWidget(self.status_channel)
         layout.addWidget(self.status_version)
+        layout.addSpacing(10)
+        layout.addWidget(self.status_build)
         layout.addSpacing(14)
         layout.addWidget(self.status_update)
+        layout.addSpacing(18)
+        layout.addWidget(self.updater_debug_info, 1)
         layout.addStretch(1)
         return bar
 
@@ -666,7 +740,18 @@ class CustomsErpWindow(QMainWindow):
         if paths:
             self._run_workflow(paths, direction, view_name)
 
-    def _run_workflow(self, paths: list[str], direction: str = "import", view_name: str = "case") -> None:
+    def _choose_workflow_folder(self, direction: str = "import", view_name: str = "case") -> None:
+        folder = QFileDialog.getExistingDirectory(self, "選擇報關文件資料夾", "")
+        if folder:
+            self._run_workflow([folder], direction, view_name, intake_mode="folder")
+
+    def _run_workflow(
+        self,
+        paths: list[str],
+        direction: str = "import",
+        view_name: str = "case",
+        intake_mode: str = "files",
+    ) -> None:
         if self.workflow_thread and self.workflow_thread.isRunning():
             self._show_toast("工作流處理中", "目前文件仍在處理。", action_visible=False, timeout_ms=3000)
             return
@@ -682,6 +767,8 @@ class CustomsErpWindow(QMainWindow):
             upload.clear()
             for path in paths:
                 upload.addItem(path)
+            if intake_mode == "folder":
+                upload.addItem("Auto Intake: 掃描資料夾並依文件內容分類 / 分票 / 核對")
         if isinstance(case_list, QTableWidget):
             case_list.setRowCount(1)
             for col, value in enumerate(["processing", "處理中", "-", "-", "-", str(len(paths)), "-", "-"]):
@@ -701,7 +788,7 @@ class CustomsErpWindow(QMainWindow):
 
         self.workflow_thread = QThread(self)
         self.workflow_thread.setProperty("workflow_view", view_name)
-        self.workflow_worker = WorkflowRunWorker(paths, direction)
+        self.workflow_worker = WorkflowRunWorker(paths, direction, intake_mode=intake_mode)
         self.workflow_worker.moveToThread(self.workflow_thread)
         self.workflow_thread.started.connect(self.workflow_worker.run)
         self.workflow_worker.progress.connect(self._on_workflow_progress)
@@ -755,10 +842,12 @@ class CustomsErpWindow(QMainWindow):
 
     def _format_workflow_failure(self, stage: str, message: str, traceback_text: str) -> str:
         details = traceback_text.strip() or "No traceback captured."
+        runtime_log = logs_dir() / "runtime.log"
         return (
             f"❌ {stage} failed\n\n"
             f"原因:\n{message}\n\n"
             "Pipeline 已停止，避免畫面永久停在 loading 狀態。\n\n"
+            f"Runtime log:\n{runtime_log}\n\n"
             f"Exception log:\n{details}"
         )
 
@@ -1076,8 +1165,18 @@ class CustomsErpWindow(QMainWindow):
 
     def _format_risk_summary(self, case: CaseWorkflow) -> str:
         lines: list[str] = []
+        lines.append("文件狀態")
+        for segment in case.documents:
+            parsed = segment.parsed
+            document_type = self._document_label(parsed.document_type if parsed else segment.detected_type)
+            lines.append(f"✓ {document_type} - {segment.source_name}")
+        if case.missing_documents:
+            lines.append("")
+            lines.append("待補文件")
         for missing in case.missing_documents:
             lines.append(f"⚠ 缺少 {missing}")
+        lines.append("")
+        lines.append("風險提醒")
         if case.audit_report:
             for result in case.audit_report.results:
                 if result.status == CheckStatus.MISMATCH:
@@ -1088,7 +1187,7 @@ class CustomsErpWindow(QMainWindow):
                     lines.append(f"⚠ {FIELD_LABELS.get(result.field.value, result.field.value)} 高風險")
             lines.extend(f"⚠ {warning}" for warning in case.audit_report.high_risk_warnings)
         lines.extend(f"⚠ {finding}" for finding in case.rule_findings)
-        if not lines:
+        if lines[-1] == "風險提醒":
             lines.append("目前未發現阻擋申報的異常。")
         return "\n".join(dict.fromkeys(lines))
 
@@ -1701,6 +1800,7 @@ class CustomsErpWindow(QMainWindow):
         result = updater.check()
         self.latest_update = result
         self._sync_update_status(result)
+        self._refresh_updater_debug_info()
         if result.should_show_popup:
             self._show_update_toast(result)
         elif interactive:
@@ -1759,6 +1859,7 @@ class CustomsErpWindow(QMainWindow):
         self.settings.version = resolve_local_version()
         state = "available" if apply_result.status != "error" else "neutral"
         self._set_update_status(apply_result.message, state)
+        self._refresh_updater_debug_info()
         self._show_toast("更新狀態", apply_result.message, action_visible=False, timeout_ms=5000)
 
     @Slot()
@@ -1793,11 +1894,203 @@ class CustomsErpWindow(QMainWindow):
             widget.style().unpolish(widget)
             widget.style().polish(widget)
 
+    def _refresh_updater_debug_info(self, local_only: bool = False) -> None:
+        self.status_build.setText(self._format_build_badge())
+        try:
+            updater = V2Updater(resolve_local_version(), self.settings.update)
+            if local_only:
+                state = {
+                    "executable_path": str(__import__("pathlib").Path(sys.executable).resolve()),
+                    "local_version": resolve_local_version(),
+                    "local_sha": "-",
+                    "remote_version": "-",
+                    "remote_sha": "-",
+                    "pending_sha": "-",
+                    "update_state": "not_checked",
+                    "finalize_state": "-",
+                    "shortcut_state": [],
+                }
+            else:
+                state = updater.debug_state()
+        except Exception as exc:
+            self.updater_debug_info.setText(f"Updater debug failed: {type(exc).__name__}: {exc}")
+            return
+
+        shortcuts = state.get("shortcut_state") if isinstance(state, dict) else []
+        shortcut_target = "-"
+        if isinstance(shortcuts, list) and shortcuts:
+            first = shortcuts[0]
+            if isinstance(first, dict):
+                shortcut_target = str(first.get("target_path", "-"))
+        current_sha = str(state.get("local_sha", "-"))
+        remote_sha = str(state.get("remote_sha", "-"))
+        pending_sha = str(state.get("pending_sha", "-"))
+        text = (
+            f"EXE: {state.get('executable_path', '-')}\n"
+            f"Current Version: {state.get('local_version', '-')} | Current SHA: {self._short_sha(current_sha)} | "
+            f"Remote Version: {state.get('remote_version', '-')} | Remote SHA: {self._short_sha(remote_sha)}\n"
+            f"Pending: {state.get('pending_exists', '-')} {self._short_sha(pending_sha)} | "
+            f"State: {state.get('update_state', '-')} | Finalized: {state.get('finalize_state', '-')} | "
+            f"Shortcut: {shortcut_target}"
+        )
+        self.updater_debug_info.setText(text)
+        self.updater_debug_info.setToolTip(text)
+
+    def _short_sha(self, value: str) -> str:
+        value = str(value or "-")
+        if len(value) >= 12 and all(char in "0123456789abcdefABCDEF" for char in value[:12]):
+            return value[:12]
+        return value
+
+    def _format_build_badge(self) -> str:
+        build = read_build_info()
+        build_time = build.build_time
+        if build_time:
+            build_time = build_time.replace("T", " ").replace("+00:00", "Z")
+            build_time = build_time[:16]
+        else:
+            build_time = "-"
+        sha = self._short_sha(build.sha256)
+        release = build.release_id or "-"
+        return f"Build: {build_time} | SHA: {sha} | Release: {release}"
+
     def _write_update_progress(self, message: str) -> None:
-        path = logs_dir() / "update-debug.log"
+        path = logs_dir() / "updater.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"[UI] {message}\n")
+
+    def _open_updater_debug_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Updater Debug")
+        dialog.resize(760, 620)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        title = QLabel("Updater Debug Panel")
+        title.setObjectName("SectionTitle")
+        details = QTextEdit()
+        details.setReadOnly(True)
+        details.setObjectName("AuditReportView")
+        reset = QPushButton("Reset Updater State")
+        refresh = QPushButton("重新整理")
+        close = QPushButton("關閉")
+        close.setObjectName("SecondaryButton")
+
+        def render() -> None:
+            updater = V2Updater(resolve_local_version(), self.settings.update)
+            state = updater.debug_state()
+            shortcuts = state.get("shortcut_state", [])
+            shortcut_lines = []
+            if isinstance(shortcuts, list) and shortcuts:
+                for item in shortcuts:
+                    if isinstance(item, dict):
+                        shortcut_lines.append(
+                            f"- {item.get('shortcut_path', '-')}\n"
+                            f"  target: {item.get('target_path', '-')}\n"
+                            f"  previous: {item.get('previous_target_path', '-')}\n"
+                            f"  action: {item.get('action', '-')}"
+                        )
+            else:
+                shortcut_lines.append("- 找不到 TongYang/通洋/Customs/報關 桌面捷徑")
+            lines = [
+                "Updater Debug Panel",
+                "",
+                f"目前執行 EXE path: {state.get('executable_path', '-')}",
+                f"Frozen EXE: {state.get('frozen', '-')}",
+                "",
+                f"local version: {state.get('local_version', '-')}",
+                f"local SHA: {state.get('local_sha', '-')}",
+                f"remote version: {state.get('remote_version', state.get('remote_error', '-'))}",
+                f"remote SHA: {state.get('remote_sha', '-')}",
+                f"pending version: {state.get('pending_version', '-')}",
+                f"pending SHA: {state.get('pending_sha', '-')}",
+                "",
+                f"update state: {state.get('update_state', '-')}",
+                f"finalize state: {state.get('finalize_state', '-')}",
+                f"cache state: {state.get('cache_state', '-')}",
+                "",
+                "Desktop shortcut targets:",
+                *shortcut_lines,
+                "",
+                f"compare result: {state.get('compare_result', '-')}",
+                f"normalized local: {state.get('normalized_local', '-')}",
+                f"normalized remote: {state.get('normalized_remote', '-')}",
+                f"SHA match: {state.get('sha_match', '-')}",
+                f"SHA changed: {state.get('sha_changed', '-')}",
+                "",
+                f"local manifest: {state.get('local_manifest_path', '-')}",
+                f"pending manifest: {state.get('pending_manifest_path', '-')}",
+                f"download URL: {state.get('download_url', '-')}",
+                "",
+                "logs/updater.log 會記錄完整判斷流程。",
+            ]
+            details.setText("\n".join(str(line) for line in lines))
+
+        def reset_and_render() -> None:
+            state = self._reset_updater_state(show_message=False)
+            render()
+            removed = state.get("reset_removed", []) if isinstance(state, dict) else []
+            QMessageBox.information(
+                dialog,
+                "Reset Updater State",
+                "Updater state reset completed.\n"
+                f"Current EXE: {state.get('executable_path', '-') if isinstance(state, dict) else '-'}\n"
+                f"State: {state.get('update_state', '-') if isinstance(state, dict) else '-'}\n"
+                f"Removed: {len(removed) if isinstance(removed, list) else 0}",
+            )
+
+        refresh.clicked.connect(render)
+        reset.clicked.connect(reset_and_render)
+        close.clicked.connect(dialog.accept)
+        button_row = QHBoxLayout()
+        button_row.addWidget(refresh)
+        button_row.addWidget(reset)
+        button_row.addStretch(1)
+        button_row.addWidget(close)
+        layout.addWidget(title)
+        layout.addWidget(details, 1)
+        layout.addLayout(button_row)
+        render()
+        dialog.exec()
+
+    def _reset_updater_state(self, show_message: bool = True) -> dict[str, object]:
+        updater = V2Updater(resolve_local_version(), self.settings.update)
+        try:
+            state = updater.reset_state()
+            self._refresh_updater_debug_info()
+            update_state = str(state.get("update_state", "-"))
+            if state.get("sha_match") or update_state in {"current", "current_sha_match", "local_newer"}:
+                self.latest_update = None
+                self._set_update_status("?桀?撌脫??啁?", "current")
+                self.toast.show_message("Updater Reset", "?湔???撌脣?蝵桐?嚗??桀?撌脫??啁?", action_visible=False)
+            elif update_state == "available":
+                remote_version = str(state.get("remote_version", "-"))
+                self._set_update_status(f"?潛?啁? {remote_version}", "available")
+                self._check_updates(interactive=False)
+            else:
+                self._set_update_status(f"Updater reset: {update_state}", "current")
+            if show_message:
+                removed = state.get("reset_removed", [])
+                QMessageBox.information(
+                    self,
+                    "Reset Updater State",
+                    "Updater state reset completed.\n"
+                    f"Current EXE: {state.get('executable_path', '-')}\n"
+                    f"Current Version: {state.get('local_version', '-')}\n"
+                    f"Current SHA: {state.get('local_sha', '-')}\n"
+                    f"Remote Version: {state.get('remote_version', state.get('remote_error', '-'))}\n"
+                    f"Remote SHA: {state.get('remote_sha', '-')}\n"
+                    f"State: {update_state}\n"
+                    f"Removed: {len(removed) if isinstance(removed, list) else 0}",
+                )
+            return state
+        except Exception as exc:
+            self._write_update_progress(f"reset updater state failed: {type(exc).__name__}: {exc}")
+            QMessageBox.critical(self, "Reset Updater State", f"Reset failed: {type(exc).__name__}: {exc}")
+            self._refresh_updater_debug_info(local_only=True)
+            return {"update_state": "reset_error", "error": f"{type(exc).__name__}: {exc}"}
 
     def _open_settings_dialog(self) -> None:
         dialog = QDialog(self)

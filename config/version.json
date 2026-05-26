@@ -1,13 +1,14 @@
 {
   "app_name": "通洋報關平台",
-  "version": "1.1.2-dev",
-  "channel": "dev",
-  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/TongYangCustomsPlatform.exe",
-  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/TongYangCustomsPlatform.exe",
-  "sha256": "796f28e33b7684cd7a14745815c431bb7d170abd4f2a646d2ad47c0b26f6cb99",
-  "build_id": "1.1.2-dev-796f28e33b76",
-  "build_time": "2026-05-26T03:53:22+00:00",
-  "release_notes": "DEV release v1.1.2-dev",
-  "notes": "DEV release v1.1.2-dev",
-  "minimum_supported_version": "1.1.2-dev"
+  "version": "1.1.3",
+  "channel": "stable",
+  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
+  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
+  "sha256": "0071e5b24875c8bceaa63545895a07a6c124b6efc5e30963b73dbcb1d511ef6a",
+  "build_id": "1.1.3-0071e5b24875",
+  "build_time": "2026-05-26T11:46:20+00:00",
+  "release_id": "v1.1.3",
+  "release_notes": "STABLE release v1.1.3 - updater state reset and runtime audit build",
+  "notes": "STABLE release v1.1.3 - updater state reset and runtime audit build",
+  "minimum_supported_version": "1.1.3"
 }

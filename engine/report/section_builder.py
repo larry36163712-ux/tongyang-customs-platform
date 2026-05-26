@@ -24,6 +24,19 @@ FIELD_LABELS = {
     "origin": "產地",
     "customer": "客戶",
     "supplier": "供應商",
+    "declaration_no": "報單號碼",
+    "invoice_no": "INV NO",
+    "bl_no": "BL NO",
+    "booking_no": "Booking NO",
+    "incoterm": "Incoterm",
+    "cif": "CIF",
+    "fob": "FOB",
+    "freight": "運費",
+    "insurance": "保費",
+    "exchange_rate": "匯率",
+    "statistical_method": "統計方式",
+    "duty_amount": "稅額",
+    "closing_date": "結關日",
 }
 
 
@@ -44,7 +57,7 @@ class SectionBuilder:
             calculation=calculation,
             result=self._aggregate_result(results, calculation),
             explanation=explanation,
-            risk=self._aggregate_risk(results),
+            risk=self._aggregate_risk(results) or "未發現明確異常。" if results else "缺少足夠資料，需人工確認。",
         )
 
     def build_from_check(self, result: CheckResult) -> AuditReportSection:

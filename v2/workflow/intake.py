@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 
 from pypdf import PdfReader
 
+from v2.core.runtime_log import log_exception, log_runtime
 from v2.ocr import OcrEngine
 from v2.workflow.cache import WorkflowCache
 from v2.workflow.models import IntakeFile, IntakePage
@@ -31,34 +32,42 @@ class FileIntakeEngine:
 
     def load_file(self, path: Path) -> IntakeFile:
         suffix = path.suffix.lower()
+        log_runtime(f"file intake start path={path} suffix={suffix}")
         key = self.cache.key_for_file(path)
         cached = self.cache.read_text(key)
         if cached is not None:
+            log_runtime(f"file intake cache hit path={path} key={key} chars={len(cached)}")
             pages = [IntakePage(1, cached)]
             return IntakeFile(path, suffix, pages, cached, {"cache": "hit", "key": key})
 
-        if suffix == ".pdf":
-            pages = self._load_pdf(path)
-        elif suffix == ".csv":
-            pages = [IntakePage(1, self._load_delimited(path, ","))]
-        elif suffix == ".tsv":
-            pages = [IntakePage(1, self._load_delimited(path, "\t"))]
-        elif suffix == ".xlsx":
-            pages = [IntakePage(1, self._load_xlsx(path))]
-        elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
-            result = self.ocr.extract_image_text(path)
-            if not result.available or not result.text.strip():
-                raise RuntimeError(f"OCR failed for {path.name}: {result.message or 'no text extracted'}")
-            pages = [IntakePage(1, result.text, True, result.message)]
-        else:
-            pages = [IntakePage(1, self._load_text(path))]
+        try:
+            if suffix == ".pdf":
+                pages = self._load_pdf(path)
+            elif suffix == ".csv":
+                pages = [IntakePage(1, self._load_delimited(path, ","))]
+            elif suffix == ".tsv":
+                pages = [IntakePage(1, self._load_delimited(path, "\t"))]
+            elif suffix == ".xlsx":
+                pages = [IntakePage(1, self._load_xlsx(path))]
+            elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+                result = self.ocr.extract_image_text(path)
+                if not result.available or not result.text.strip():
+                    raise RuntimeError(f"OCR failed for {path.name}: {result.message or 'no text extracted'}")
+                pages = [IntakePage(1, result.text, True, result.message)]
+            else:
+                pages = [IntakePage(1, self._load_text(path))]
+        except Exception as exc:
+            log_exception(f"file intake failed path={path}", exc)
+            raise
 
         text = "\n\n".join(page.text for page in pages)
         self.cache.write_text(key, text)
         self.cache.write_debug(key, {"path": str(path), "suffix": suffix, "page_count": len(pages)})
+        log_runtime(f"file intake completed path={path} pages={len(pages)} chars={len(text)}")
         return IntakeFile(path, suffix, pages, text, {"cache": "miss", "key": key})
 
     def _load_pdf(self, path: Path) -> list[IntakePage]:
+        log_runtime(f"PDF load start path={path}")
         reader = PdfReader(str(path))
         pages: list[IntakePage] = []
         for index, page in enumerate(reader.pages, start=1):
@@ -66,6 +75,7 @@ class FileIntakeEngine:
             ocr_used = False
             ocr_message = ""
             if not text.strip():
+                log_runtime(f"PDF page requires OCR path={path} page={index}")
                 result = self.ocr.extract_pdf_page_text(path, index - 1)
                 if not result.available or not result.text.strip():
                     raise RuntimeError(
@@ -75,6 +85,7 @@ class FileIntakeEngine:
                 ocr_used = result.available
                 ocr_message = result.message
             pages.append(IntakePage(index, text, ocr_used, ocr_message))
+        log_runtime(f"PDF load completed path={path} pages={len(pages)}")
         return pages
 
     def _load_text(self, path: Path) -> str:
@@ -91,6 +102,7 @@ class FileIntakeEngine:
         return "\n".join(" | ".join(cell.strip() for cell in row) for row in rows)
 
     def _load_xlsx(self, path: Path) -> str:
+        log_runtime(f"XLSX load start path={path}")
         ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
         with zipfile.ZipFile(path) as archive:
             shared: list[str] = []
@@ -116,4 +128,6 @@ class FileIntakeEngine:
                         cells.append(value)
                     if any(cells):
                         lines.append(" | ".join(cells))
-            return "\n".join(lines)
+            text = "\n".join(lines)
+            log_runtime(f"XLSX load completed path={path} lines={len(lines)} chars={len(text)}")
+            return text

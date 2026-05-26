@@ -45,19 +45,38 @@ def main() -> None:
     update = work_dir / "AI_Customs_ERP_V2.update.exe"
     backup = work_dir / "通洋報關平台.rollback.exe"
     log = work_dir / "update-debug.log"
+    local_manifest = work_dir / "version.json"
+    pending_manifest = work_dir / "version.pending.json"
     script_path = work_dir / "update-success.bat"
 
     current.write_bytes(old_exe.read_bytes())
     update.write_bytes(new_exe.read_bytes())
+    local_manifest.write_text('{"version":"1.0.0","sha256":"old","channel":"stable"}', encoding="utf-8")
+    pending_manifest.write_text('{"version":"1.0.1","sha256":"new","channel":"stable"}', encoding="utf-8")
     expected = sha256(update)
     code = run_script(
-        build_replace_script(current, update, backup, log, expected, old_pid=0, restart=False, cleanup=False),
+        build_replace_script(
+            current,
+            update,
+            backup,
+            log,
+            expected,
+            old_pid=0,
+            local_manifest_path=local_manifest,
+            pending_manifest_path=pending_manifest,
+            restart=False,
+            cleanup=False,
+        ),
         script_path,
     )
     if code != 0:
         raise RuntimeError(f"success replace script failed: {code}")
     if sha256(current) != expected:
         raise RuntimeError("current exe was not replaced by update exe")
+    if '"version":"1.0.1"' not in local_manifest.read_text(encoding="utf-8").replace(" ", ""):
+        raise RuntimeError("pending manifest was not finalized by replace script")
+    if pending_manifest.exists():
+        raise RuntimeError("pending manifest was not removed by replace script")
 
     rollback_current = work_dir / "rollback-current.exe"
     rollback_update = work_dir / "rollback-update.exe"

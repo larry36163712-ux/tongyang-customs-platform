@@ -28,6 +28,8 @@ on:
       - "AI_Customs_ERP_V2.spec"
       - "build_v2_exe.ps1"
       - ".github/workflows/release.yml"
+      - ".github/workflows/build.yml"
+      - ".github/workflows/cleanup_dev_releases.yml"
 
 permissions:
   contents: write
@@ -87,7 +89,7 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
-          python -m py_compile v2\ui\main_window.py v2\core\updater.py v2\core\settings.py scripts\make_release_manifest.py
+          python -m py_compile v2\ui\main_window.py v2\core\updater.py v2\core\settings.py scripts\make_release_manifest.py scripts\release_contract.py
           python scripts\test_v2_document_workflow.py
           python scripts\test_v2_declaration_workflow.py
           python scripts\test_v2_updater_version_source.py
@@ -132,6 +134,12 @@ jobs:
             $manifest.download_url = $latestExeUrl
           }
           $manifest | ConvertTo-Json -Depth 30 | Set-Content "dist\version.json" -Encoding UTF8
+          python scripts\release_contract.py `
+            --mode manifest `
+            --repo $repo `
+            --tag $tag `
+            --channel $channel `
+            --manifest "dist\version.json"
 
           New-Item -ItemType Directory -Force -Path "dist\config" | Out-Null
           Copy-Item -LiteralPath "dist\version.json" -Destination "dist\config\version.json" -Force
@@ -224,6 +232,8 @@ jobs:
 
       - name: Verify published URLs
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $repo = "${{ github.repository }}"
           $tag = "${{ steps.vars.outputs.tag }}"
@@ -231,9 +241,11 @@ jobs:
           if ($channel -eq "stable") {
             $manifestUrl = "https://github.com/$repo/releases/latest/download/version.json"
             $exeUrl = "https://github.com/$repo/releases/latest/download/TongYangCustomsPlatform.exe"
+            $shaUrl = "https://github.com/$repo/releases/latest/download/SHA256.txt"
           } else {
             $manifestUrl = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
             $exeUrl = "https://github.com/$repo/releases/download/$tag/TongYangCustomsPlatform.exe"
+            $shaUrl = "https://github.com/$repo/releases/download/$tag/SHA256.txt"
           }
 
           $manifestResponse = Invoke-WebRequest -Method Get -Uri $manifestUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
@@ -242,8 +254,26 @@ jobs:
           foreach ($field in @("version", "channel", "exe_url", "release_notes", "minimum_supported_version", "sha256", "build_id", "build_time")) {
             if (-not $manifest.$field) { throw "version manifest missing field: $field" }
           }
+          if ($manifest.exe_url -ne $exeUrl) { throw "version manifest exe_url mismatch. manifest=$($manifest.exe_url) expected=$exeUrl" }
+          if ($manifest.sha256 -notmatch "^[0-9a-f]{64}$") { throw "version manifest sha256 is invalid: $($manifest.sha256)" }
 
           $exeResponse = Invoke-WebRequest -Method Head -Uri $exeUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
           if ($exeResponse.StatusCode -lt 200 -or $exeResponse.StatusCode -ge 400) {
             throw "EXE HTTP status was $($exeResponse.StatusCode)"
           }
+          $shaResponse = Invoke-WebRequest -Method Get -Uri $shaUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
+          if ($shaResponse.StatusCode -ne 200) { throw "SHA256.txt HTTP status was $($shaResponse.StatusCode)" }
+          if ($shaResponse.Content -notmatch [regex]::Escape($manifest.sha256)) { throw "SHA256.txt does not contain manifest sha256" }
+          if ($shaResponse.Content -notmatch "TongYangCustomsPlatform\.exe") { throw "SHA256.txt does not reference TongYangCustomsPlatform.exe" }
+
+          $contractArgs = @(
+            "scripts\release_contract.py",
+            "--repo", $repo,
+            "--tag", $tag,
+            "--channel", $channel,
+            "--token", $env:GH_TOKEN
+          )
+          if ($channel -eq "stable") {
+            $contractArgs += "--require-latest"
+          }
+          python @contractArgs

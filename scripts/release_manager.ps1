@@ -21,6 +21,16 @@ if ([string]::IsNullOrWhiteSpace($AssetName)) {
 if ($AssetName -ne $OfficialExeName) {
     throw "Executable release asset must be $OfficialExeName."
 }
+$script:ReleaseCreatedByThisRun = $false
+
+trap {
+    $errorMessage = $_.Exception.Message
+    if ($script:ReleaseCreatedByThisRun) {
+        Write-Host "Release governance cleanup: deleting failed release $Tag because verification did not complete."
+        & gh release delete $Tag --repo $Repo --yes --cleanup-tag
+    }
+    throw $errorMessage
+}
 
 function Invoke-Gh {
     & gh @args
@@ -54,6 +64,9 @@ function Remove-OldDevReleases {
         $name = [string]$release.tagName
         $isDevTag = $name -match '^DEV-' -or $name -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'
         if ($isDevTag -and $name -ne $KeepTag) {
+            if ($name -match '^v\d+\.\d+\.\d+$') {
+                throw "Cleanup safety refused to delete stable-looking tag during DEV cleanup: $name"
+            }
             Write-Host "Deleting old DEV release: $name"
             & gh release delete $name --repo $Repo --yes --cleanup-tag
             if ($LASTEXITCODE -ne 0) {
@@ -96,14 +109,29 @@ function Remove-OldStableReleases {
         ([string]$_.tagName) -match '^v\d+\.\d+\.\d+$' -and -not $_.isPrerelease
     } | Sort-Object publishedAt -Descending)
 
+    $latest = & gh api "repos/$Repo/releases/latest" | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) {
+        throw "Cleanup safety failed to resolve /releases/latest."
+    }
+    $latestStableTag = [string]$latest.tag_name
+    if ($latest.prerelease -or $latestStableTag -notmatch '^v\d+\.\d+\.\d+$') {
+        throw "Cleanup safety refused to run stable cleanup because /releases/latest is not stable: $latestStableTag"
+    }
+
     $keep = @($stableReleases | Select-Object -First $KeepCount | ForEach-Object { [string]$_.tagName })
     if ($keep -notcontains $KeepTag) {
         $keep += $KeepTag
+    }
+    if ($keep -notcontains $latestStableTag) {
+        $keep += $latestStableTag
     }
 
     foreach ($release in $stableReleases) {
         $name = [string]$release.tagName
         if ($keep -notcontains $name) {
+            if ($name -eq $latestStableTag) {
+                throw "Cleanup safety refused to delete latest stable release: $name"
+            }
             Write-Host "Deleting old stable release and tag: $name"
             & gh release delete $name --repo $Repo --yes --cleanup-tag
             if ($LASTEXITCODE -ne 0) {
@@ -148,10 +176,23 @@ function Assert-ReleaseAssets {
     if (-not $manifest.channel) { throw "version.json missing channel." }
     if (-not $manifest.release_notes) { throw "version.json missing release_notes." }
     if (-not $manifest.minimum_supported_version) { throw "version.json missing minimum_supported_version." }
+    if (-not $manifest.build_id) { throw "version.json missing build_id." }
+    if (-not $manifest.build_time) { throw "version.json missing build_time." }
+    if (-not $manifest.sha256) { throw "version.json missing sha256." }
+    if ($manifest.channel -ne $Channel) { throw "version.json channel mismatch. manifest=$($manifest.channel) expected=$Channel" }
+    if ($manifest.sha256 -notmatch '^[0-9a-f]{64}$') { throw "version.json sha256 is invalid: $($manifest.sha256)" }
 
     Invoke-WebRequest -Method Head -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
     Invoke-WebRequest -Method Head -Uri $exeAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
     Invoke-WebRequest -Method Head -Uri $manifestExeUrl -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
+    $shaAsset = $release.assets | Where-Object { $_.name -eq "SHA256.txt" } | Select-Object -First 1
+    $shaText = (Invoke-WebRequest -Method Get -Uri $shaAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing).Content
+    if ($shaText -notmatch [regex]::Escape($manifest.sha256)) {
+        throw "SHA256.txt does not contain manifest sha256."
+    }
+    if ($shaText -notmatch [regex]::Escape($OfficialExeName)) {
+        throw "SHA256.txt does not reference $OfficialExeName."
+    }
 }
 
 function Assert-LatestRelease {
@@ -163,6 +204,39 @@ function Assert-LatestRelease {
     }
 }
 
+function Assert-LocalReleaseFiles {
+    foreach ($path in @($ExePath, $VersionPath, $ShaPath)) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "Release preflight failed. Missing local asset: $path"
+        }
+    }
+    if ((Split-Path -Leaf $ExePath) -ne $OfficialExeName) {
+        throw "Release preflight failed. EXE must be named $OfficialExeName."
+    }
+    $manifest = Get-Content -LiteralPath $VersionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($field in @("version", "channel", "exe_url", "release_notes", "minimum_supported_version", "build_id", "build_time", "sha256")) {
+        if (-not $manifest.$field) { throw "Release preflight failed. version.json missing field: $field" }
+    }
+    if ($manifest.channel -ne $Channel) {
+        throw "Release preflight failed. version.json channel mismatch: $($manifest.channel) != $Channel"
+    }
+    if ($manifest.sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "Release preflight failed. version.json sha256 is invalid."
+    }
+    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $ExePath).Hash.ToLower()
+    if ($actualHash -ne $manifest.sha256) {
+        throw "Release preflight failed. EXE SHA256 mismatch. actual=$actualHash manifest=$($manifest.sha256)"
+    }
+    $shaText = Get-Content -LiteralPath $ShaPath -Raw -Encoding UTF8
+    if ($shaText -notmatch [regex]::Escape($manifest.sha256)) {
+        throw "Release preflight failed. SHA256.txt does not contain manifest sha256."
+    }
+    if ($shaText -notmatch [regex]::Escape($OfficialExeName)) {
+        throw "Release preflight failed. SHA256.txt does not reference $OfficialExeName."
+    }
+}
+
+Assert-LocalReleaseFiles
 $release = Get-ReleaseByTag $Tag
 if ($release) {
     Invoke-Gh release edit $Tag --repo $Repo --title $Tag --notes-file $NotesPath
@@ -172,6 +246,7 @@ if ($release) {
     } else {
         Invoke-Gh release create $Tag --repo $Repo --title $Tag --notes-file $NotesPath --latest
     }
+    $script:ReleaseCreatedByThisRun = $true
     $release = Get-ReleaseByTag $Tag
 }
 
@@ -205,3 +280,4 @@ Write-Host "Release manager completed."
 Write-Host "Channel: $Channel"
 Write-Host "Tag: $Tag"
 Write-Host "Latest URL: https://github.com/$Repo/releases/tag/$Tag"
+$script:ReleaseCreatedByThisRun = $false
