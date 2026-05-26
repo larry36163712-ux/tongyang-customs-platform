@@ -45,7 +45,11 @@ function Get-ReleaseByTag {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) {
         return $null
     }
-    return $json | ConvertFrom-Json
+    try {
+        return $json | ConvertFrom-Json
+    } catch {
+        return $null
+    }
 }
 
 function Remove-OldDevReleases {
