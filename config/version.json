@@ -1,13 +1,13 @@
-﻿{
-    "app_name":  "通洋報關平台",
-    "version":  "1.1.2-dev",
-    "channel":  "dev",
-    "exe_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe",
-    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe",
-    "sha256":  "9a59da9059a96d098761398ec37cf7597594941163f7ca0f757a8838dffe51cc",
-    "build_id":  "1.1.2-dev-9a59da9059a9",
-    "build_time":  "2026-05-26T03:27:40+00:00",
-    "release_notes":  "DEV release v1.1.2-dev",
-    "notes":  "DEV release v1.1.2-dev",
-    "minimum_supported_version":  "1.1.2-dev"
+{
+  "app_name": "通洋報關平台",
+  "version": "1.1.2-dev",
+  "channel": "dev",
+  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe",
+  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/%E9%80%9A%E6%B4%8B%E5%A0%B1%E9%97%9C%E5%B9%B3%E5%8F%B0.exe",
+  "sha256": "ed3ea8fafa833bd8e16065b83a90dc78161ac535eeb9f2b6675342204e8e5c8e",
+  "build_id": "1.1.2-dev-ed3ea8fafa83",
+  "build_time": "2026-05-26T03:30:28+00:00",
+  "release_notes": "DEV release v1.1.2-dev",
+  "notes": "DEV release v1.1.2-dev",
+  "minimum_supported_version": "1.1.2-dev"
 }
