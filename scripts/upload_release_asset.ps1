@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 if (-not $env:GH_TOKEN) {
     throw "GH_TOKEN is required."
 }
-$RequiredExecutableName = "TongYangCustomsPlatform.exe"
+$RequiredExecutableName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
 
 if (-not (Test-Path -LiteralPath $Path)) {
     throw "Asset file not found: $Path"
@@ -21,6 +21,7 @@ if ($AssetName -ne $RequiredExecutableName -and $Path.ToLowerInvariant().EndsWit
 }
 
 $blockedFallbackExeName = ("default" + ".exe")
+$blockedEnglishExeName = ("TongYang" + "CustomsPlatform.exe")
 $localChineseExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
 
 $headers = @{
@@ -36,7 +37,7 @@ $release = Invoke-RestMethod `
     -Headers $headers
 
 foreach ($asset in $release.assets) {
-    if ($asset.name -eq $AssetName -or ($Path.ToLowerInvariant().EndsWith(".exe") -and ($asset.name -eq $blockedFallbackExeName -or $asset.name -eq $localChineseExeName))) {
+    if ($asset.name -eq $AssetName -or ($Path.ToLowerInvariant().EndsWith(".exe") -and ($asset.name -eq $blockedFallbackExeName -or $asset.name -eq $blockedEnglishExeName))) {
         Invoke-RestMethod -Method Delete -Uri $asset.url -Headers $headers | Out-Null
     }
 }

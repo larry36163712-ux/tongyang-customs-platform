@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)][string]$ExePath,
     [Parameter(Mandatory = $true)][string]$VersionPath,
     [Parameter(Mandatory = $true)][string]$ShaPath,
-    [string]$AssetName = "TongYangCustomsPlatform.exe"
+    [string]$AssetName = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,8 +14,12 @@ $ErrorActionPreference = "Stop"
 if (-not $env:GH_TOKEN) {
     throw "GH_TOKEN is required."
 }
-if ($AssetName -ne "TongYangCustomsPlatform.exe") {
-    throw "Executable release asset must be TongYangCustomsPlatform.exe."
+$OfficialExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+if ([string]::IsNullOrWhiteSpace($AssetName)) {
+    $AssetName = $OfficialExeName
+}
+if ($AssetName -ne $OfficialExeName) {
+    throw "Executable release asset must be $OfficialExeName."
 }
 
 function Invoke-Gh {
@@ -113,7 +117,7 @@ function Assert-ReleaseAssets {
     param([string]$ReleaseTag)
 
     $release = & gh api "repos/$Repo/releases/tags/$ReleaseTag" | ConvertFrom-Json
-    $required = @("TongYangCustomsPlatform.exe", "version.json", "SHA256.txt")
+    $required = @($OfficialExeName, "version.json", "SHA256.txt")
     $assetNames = @($release.assets | ForEach-Object { $_.name })
     foreach ($name in $required) {
         if ($assetNames -notcontains $name) {
@@ -122,19 +126,19 @@ function Assert-ReleaseAssets {
     }
 
     $manifestAsset = $release.assets | Where-Object { $_.name -eq "version.json" } | Select-Object -First 1
-    $exeAsset = $release.assets | Where-Object { $_.name -eq "TongYangCustomsPlatform.exe" } | Select-Object -First 1
+    $exeAsset = $release.assets | Where-Object { $_.name -eq $OfficialExeName } | Select-Object -First 1
     if (-not $manifestAsset.browser_download_url) {
         throw "version.json is missing browser_download_url."
     }
     if (-not $exeAsset.browser_download_url) {
-        throw "TongYangCustomsPlatform.exe is missing browser_download_url."
+        throw "$OfficialExeName is missing browser_download_url."
     }
 
     $manifest = Invoke-RestMethod -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"}
     $expectedLatestExeUrl = if ($Channel -eq "stable") {
-        "https://github.com/$Repo/releases/latest/download/TongYangCustomsPlatform.exe"
+        "https://github.com/$Repo/releases/latest/download/$([Uri]::EscapeDataString($OfficialExeName))"
     } else {
-        "https://github.com/$Repo/releases/download/$ReleaseTag/TongYangCustomsPlatform.exe"
+        "https://github.com/$Repo/releases/download/$ReleaseTag/$([Uri]::EscapeDataString($OfficialExeName))"
     }
     $manifestExeUrl = if ($manifest.exe_url) { $manifest.exe_url } else { $manifest.download_url }
     if ($manifestExeUrl -ne $expectedLatestExeUrl) {

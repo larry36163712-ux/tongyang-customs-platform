@@ -63,8 +63,9 @@ def main() -> None:
             f"local_version_path={local_manifest}",
             "local_version=1.0.2",
             "remote_version=1.0.2",
-            "compare result=0 should_show_popup=False",
-            "update result=current should_show_popup=False",
+            "compare result=0",
+            "sha_changed=False",
+            "update result=current same_version_same_build should_show_popup=False",
         ]
         missing = [item for item in required if item not in log_text]
         if missing:
@@ -90,6 +91,12 @@ def main() -> None:
         older_result = updater.check()
         if older_result.should_show_popup:
             raise RuntimeError("remote older version must not show update popup")
+
+        same_version_new_sha = updater_module.UpdateManifest("1.0.2", "local", "def", "stable")
+        updater._load_manifest = lambda: same_version_new_sha  # type: ignore[method-assign]
+        same_version_new_sha_result = updater.check()
+        if same_version_new_sha_result.status != "available" or not same_version_new_sha_result.should_show_popup:
+            raise RuntimeError("same version with different remote sha256 should update")
 
         dev_called = False
         dev_updater = V2Updater("0.0.0", UpdateSettings(enabled=True, channel="dev"))

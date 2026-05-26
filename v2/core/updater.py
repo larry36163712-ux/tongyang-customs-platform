@@ -18,6 +18,7 @@ from v2.core.settings import (
     UpdateSettings,
     local_manifest_path,
     logs_dir,
+    read_local_manifest,
     resolve_local_version,
     settings_path,
     version_debug_log,
@@ -33,6 +34,7 @@ class UpdateManifest:
     sha256: str
     channel: str
     notes: str = ""
+    build_id: str = ""
     build_time: str = ""
     exe_url: str = ""
     release_notes: str = ""
@@ -45,6 +47,7 @@ class UpdateManifest:
             "exe_url": self.exe_url or self.download_url,
             "download_url": self.download_url,
             "sha256": self.sha256,
+            "build_id": self.build_id,
             "channel": self.channel,
             "release_notes": self.release_notes or self.notes,
             "notes": self.notes or self.release_notes,
@@ -103,19 +106,44 @@ class V2Updater:
             f"channel={self.settings.channel} remote_channel={manifest.channel}"
         )
 
+        local_manifest = read_local_manifest()
+        local_sha256 = self._current_exe_sha256(local_manifest)
+        sha_changed = bool(manifest.sha256 and local_sha256 and manifest.sha256 != local_sha256)
+        build_id_changed = bool(
+            manifest.build_id
+            and str(local_manifest.get("build_id", "")).strip()
+            and manifest.build_id != str(local_manifest.get("build_id", "")).strip()
+        )
+        build_time_changed = bool(
+            manifest.build_time
+            and str(local_manifest.get("build_time", "")).strip()
+            and manifest.build_time != str(local_manifest.get("build_time", "")).strip()
+        )
         compare = _compare_versions(self.current_version, manifest.version)
-        should_show_popup = compare < 0
-        self._log(f"compare result={compare} should_show_popup={should_show_popup}")
+        content_changed_same_version = compare == 0 and (sha_changed or build_id_changed or build_time_changed)
+        should_show_popup = compare < 0 or content_changed_same_version
+        self._log(
+            f"compare result={compare} local_sha256={local_sha256} remote_sha256={manifest.sha256} "
+            f"sha_changed={sha_changed} build_id_changed={build_id_changed} "
+            f"build_time_changed={build_time_changed} should_show_popup={should_show_popup}"
+        )
         version_debug_log(
             f"local_version={self.current_version} remote_version={manifest.version} "
             f"channel={self.settings.channel} remote_channel={manifest.channel} "
-            f"compare_result={compare} should_show_popup={should_show_popup}"
+            f"compare_result={compare} local_sha256={local_sha256} remote_sha256={manifest.sha256} "
+            f"sha_changed={sha_changed} build_id_changed={build_id_changed} "
+            f"build_time_changed={build_time_changed} should_show_popup={should_show_popup}"
         )
-        if compare >= 0:
+        if compare > 0:
             self._log("update result=current should_show_popup=False")
+            return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest, compare, False)
+        if compare == 0 and not content_changed_same_version:
+            self._log("update result=current same_version_same_build should_show_popup=False")
             return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest, compare, False)
 
         self._log("update result=available should_show_popup=True")
+        if content_changed_same_version:
+            return UpdateCheck("available", f"發現同版本新版 build {manifest.version}。", manifest, compare, True)
         return UpdateCheck("available", f"發現新版 {manifest.version}。", manifest, compare, True)
 
     def apply(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> UpdateCheck:
@@ -163,6 +191,7 @@ class V2Updater:
             sha256=str(manifest.get("sha256", "")).strip().lower(),
             channel=str(manifest.get("channel", self.settings.channel)).strip() or self.settings.channel,
             notes=str(manifest.get("notes") or manifest.get("release_notes") or ""),
+            build_id=str(manifest.get("build_id", "")).strip(),
             build_time=str(manifest.get("build_time", "")),
             exe_url=str(manifest.get("exe_url") or manifest.get("download_url") or "").strip(),
             release_notes=str(manifest.get("release_notes") or manifest.get("notes") or ""),
@@ -244,6 +273,13 @@ class V2Updater:
         self._log(f"progress {stage} percent={percent} message={message}")
         if progress:
             progress(stage, percent, message)
+
+    def _current_exe_sha256(self, local_manifest: dict) -> str:
+        if getattr(sys, "frozen", False):
+            exe_path = Path(sys.executable).resolve()
+            if exe_path.is_file():
+                return hashlib.sha256(exe_path.read_bytes()).hexdigest().lower()
+        return str(local_manifest.get("sha256", "")).strip().lower()
 
 
 def _read_json_url(url: str) -> dict | list:

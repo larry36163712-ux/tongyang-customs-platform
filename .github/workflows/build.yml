@@ -61,9 +61,8 @@ jobs:
           $version = "${{ inputs.version || '1.1.2-dev' }}"
           $channel = "${{ inputs.channel || 'dev' }}"
           $tag = "v$version"
-          $assetName = "TongYangCustomsPlatform.exe"
-          $localExeName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
-          $exePath = Join-Path "dist" $localExeName
+          $assetName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+wLmV4ZQ=="))
+          $exePath = Join-Path "dist" $assetName
 
           python scripts/make_release_manifest.py `
             --repo $repo `
