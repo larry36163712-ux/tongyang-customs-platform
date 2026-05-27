@@ -16,6 +16,34 @@ for source, target in (
     if path.exists():
         datas.append((str(path), target))
 
+
+def safe_collect_submodules(package):
+    try:
+        return collect_submodules(
+            package,
+            filter=lambda name: (
+                ".tests" not in name
+                and ".testing" not in name
+                and not name.endswith(".tests")
+                and not name.endswith(".conftest")
+                and ".conftest" not in name
+            ),
+        )
+    except Exception:
+        return []
+
+
+runtime_packages = [
+    "PIL",
+    "pytesseract",
+    "fitz",
+    "pdf2image",
+    "cv2",
+    "numpy",
+    "openpyxl",
+    "pandas",
+]
+
 a = Analysis(
     ["v2/main.py"],
     pathex=[str(ROOT)],
@@ -28,12 +56,15 @@ a = Analysis(
         "PIL",
         "pytesseract",
         "fitz",
+        "pdf2image",
+        "cv2",
+        "numpy",
+        "openpyxl",
+        "pandas",
     ]
-    + collect_submodules("engine")
-    + collect_submodules("v2")
-    + collect_submodules("PIL")
-    + collect_submodules("pytesseract")
-    + collect_submodules("fitz"),
+    + safe_collect_submodules("engine")
+    + safe_collect_submodules("v2")
+    + [module for package in runtime_packages for module in safe_collect_submodules(package)],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

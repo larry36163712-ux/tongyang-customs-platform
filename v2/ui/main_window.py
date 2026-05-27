@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from html import escape
+from pathlib import Path
 import queue
 import sys
 import threading
@@ -171,6 +172,47 @@ class DocumentDropList(QListWidget):
             super().dropEvent(event)
 
 
+class WorkflowDropPanel(QFrame):
+    files_dropped = Signal(list)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setAcceptDrops(True)
+        self.setObjectName("WorkflowUpload")
+
+    def dragEnterEvent(self, event) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls():
+            self.setProperty("dragActive", True)
+            self.style().unpolish(self)
+            self.style().polish(self)
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # type: ignore[override]
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:  # type: ignore[override]
+        self.setProperty("dragActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:  # type: ignore[override]
+        self.setProperty("dragActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+
 class ToastNotification(QFrame):
     action_clicked = Signal()
 
@@ -262,6 +304,24 @@ class UpdateApplyWorker(QObject):
         self.finished.emit(result)
 
 
+class UpdateCheckWorker(QObject):
+    finished = Signal(object)
+
+    def __init__(self, version: str, settings: object) -> None:
+        super().__init__()
+        self.version = version
+        self.settings = settings
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = V2Updater(self.version, self.settings).check()
+        except Exception as exc:
+            log_exception("update check failed", exc)
+            result = UpdateCheck("error", f"更新檢查失敗，請稍後再試。詳細資訊已寫入 logs/updater.log。")
+        self.finished.emit(result)
+
+
 class WorkflowRunWorker(QObject):
     progress = Signal(str, int, str)
     finished = Signal(object)
@@ -314,8 +374,6 @@ class WorkflowRunWorker(QObject):
                 stage = getattr(exc, "stage", "workflow pipeline")
                 message = str(exc)
                 log_exception(f"workflow backend failed stage={stage}", exc)
-                print(f"[workflow] {stage} failed: {message}", flush=True)
-                print(traceback_text, flush=True)
                 events.put(("finished", WorkflowFailure(stage=stage, message=message, traceback_text=traceback_text)))
 
         queued_label = "folder" if self.intake_mode == "folder" else "file(s)"
@@ -429,6 +487,8 @@ class CustomsErpWindow(QMainWindow):
         self.toast: ToastNotification | None = None
         self.workflow_thread: QThread | None = None
         self.workflow_worker: WorkflowRunWorker | None = None
+        self.update_check_thread: QThread | None = None
+        self.update_check_worker: UpdateCheckWorker | None = None
         self.update_thread: QThread | None = None
         self.update_worker: UpdateApplyWorker | None = None
 
@@ -541,16 +601,16 @@ class CustomsErpWindow(QMainWindow):
         header_row.addWidget(mode)
         layout.addLayout(header_row)
 
-        upload_panel = QFrame()
-        upload_panel.setObjectName("WorkflowUpload")
+        upload_panel = WorkflowDropPanel()
         upload_panel.setMaximumHeight(140)
+        upload_panel.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
         upload_layout = QVBoxLayout(upload_panel)
         upload_layout.setContentsMargins(14, 10, 14, 10)
         upload_layout.setSpacing(8)
         upload_top = QHBoxLayout()
         upload_list = DocumentDropList()
         upload_list.setMaximumHeight(58)
-        upload_list.addItem("拖曳 INV / PACKING / B/L / 報單 / 清表到這裡")
+        upload_list.addItem("拖曳 PDF / JPG / PNG / XLSX / CSV / TXT 或整個資料夾到這裡")
         upload_list.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
         upload_button = QPushButton("選擇文件")
         upload_button.clicked.connect(lambda: self._choose_workflow_documents(mode.currentText(), view_name))
@@ -795,6 +855,16 @@ class CustomsErpWindow(QMainWindow):
         view_name: str = "case",
         intake_mode: str = "files",
     ) -> None:
+        if intake_mode == "files":
+            folder_paths = [path for path in paths if Path(path).is_dir()]
+            file_paths = [path for path in paths if not Path(path).is_dir()]
+            if folder_paths and not file_paths and len(folder_paths) == 1:
+                intake_mode = "folder"
+            elif folder_paths:
+                expanded: list[str] = []
+                for folder in folder_paths:
+                    expanded.extend(str(item) for item in Path(folder).rglob("*") if item.is_file())
+                paths = file_paths + expanded
         if self.workflow_thread and self.workflow_thread.isRunning():
             self._show_toast("工作流處理中", "目前文件仍在處理。", action_visible=False, timeout_ms=3000)
             return
@@ -811,8 +881,9 @@ class CustomsErpWindow(QMainWindow):
             upload.clear()
             for path in paths:
                 upload.addItem(path)
+            upload.addItem(f"已加入 {len(paths)} 份文件")
             if intake_mode == "folder":
-                upload.addItem("整批文件已送入自動核對流程")
+                upload.addItem("已加入 1 個資料夾，將自動掃描並建立核對流程")
         if isinstance(case_list, QTableWidget):
             case_list.setRowCount(1)
             for col, value in enumerate(["processing", "處理中", "-", "-", "-", str(len(paths)), "-", "-"]):
@@ -870,7 +941,7 @@ class CustomsErpWindow(QMainWindow):
             if isinstance(audit_report, QTextEdit):
                 audit_report.setText(failure_text)
             if isinstance(summary, QTextEdit):
-                summary.setText(f"❌ {stage} failed\n\n{message}")
+                summary.setText(f"⚠ {self._human_workflow_message(stage, message)}")
             if isinstance(debug, QTextEdit):
                 debug.setText(failure_text)
             self._set_workflow_progress(str(view_name), "Exception", 100, message)
@@ -2178,14 +2249,31 @@ class CustomsErpWindow(QMainWindow):
         self.print_status.setText(" / ".join(warnings) if warnings else f"已建立 {method} 進口待印流程。")
 
     def _check_updates_on_startup(self) -> None:
-        result = self._check_updates(interactive=False)
-        if result and result.should_show_popup:
-            self._show_update_toast(result)
+        self._check_updates(interactive=False)
 
     def _check_updates(self, interactive: bool) -> UpdateCheck | None:
+        if self.update_check_thread and self.update_check_thread.isRunning():
+            if interactive:
+                self._show_toast("更新狀態", "正在背景檢查更新。", action_visible=False, timeout_ms=2500)
+            return None
         self.settings.version = resolve_local_version()
-        updater = V2Updater(self.settings.version, self.settings.update)
-        result = updater.check()
+        self._set_update_status("背景檢查更新中...", "neutral")
+        self.update_check_thread = QThread(self)
+        self.update_check_thread.setProperty("interactive", interactive)
+        self.update_check_worker = UpdateCheckWorker(self.settings.version, self.settings.update)
+        self.update_check_worker.moveToThread(self.update_check_thread)
+        self.update_check_thread.started.connect(self.update_check_worker.run)
+        self.update_check_worker.finished.connect(self._on_update_check_finished)
+        self.update_check_worker.finished.connect(self.update_check_thread.quit)
+        self.update_check_worker.finished.connect(self.update_check_worker.deleteLater)
+        self.update_check_thread.finished.connect(self.update_check_thread.deleteLater)
+        self.update_check_thread.finished.connect(self._clear_update_check_worker)
+        self.update_check_thread.start()
+        return None
+
+    @Slot(object)
+    def _on_update_check_finished(self, result: UpdateCheck) -> None:
+        interactive = bool(self.update_check_thread.property("interactive")) if self.update_check_thread else False
         self.latest_update = result
         self._sync_update_status(result)
         self._refresh_updater_debug_info()
@@ -2193,7 +2281,11 @@ class CustomsErpWindow(QMainWindow):
             self._show_update_toast(result)
         elif interactive:
             self._show_toast("更新狀態", result.message, action_visible=False, timeout_ms=4200)
-        return result
+
+    @Slot()
+    def _clear_update_check_worker(self) -> None:
+        self.update_check_thread = None
+        self.update_check_worker = None
 
     def _show_update_toast(self, result: UpdateCheck) -> None:
         if not result.manifest:
@@ -2962,6 +3054,10 @@ class CustomsErpWindow(QMainWindow):
             }
             #WorkflowUpload {
                 max-height: 140px;
+            }
+            #WorkflowUpload[dragActive="true"] {
+                border: 2px solid #2563EB;
+                background: #EFF6FF;
             }
             #ResultBox, #CompareTable {
                 background: #FFFFFF;
