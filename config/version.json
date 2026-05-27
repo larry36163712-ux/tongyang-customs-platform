@@ -1,14 +1,14 @@
 {
   "app_name": "通洋報關平台",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "channel": "stable",
   "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
   "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
-  "sha256": "a01ca54120f75accd1e31af5be24aaeb3e3bdd4f3c3ba6ea9d575feda3574672",
-  "build_id": "1.1.5-a01ca54120f7",
-  "build_time": "2026-05-27T03:44:14+00:00",
-  "release_id": "v1.1.5",
-  "release_notes": "STABLE release v1.1.5 - Production Windows desktop app experience and OCR runtime packaging",
-  "notes": "STABLE release v1.1.5 - Production Windows desktop app experience and OCR runtime packaging",
-  "minimum_supported_version": "1.1.5"
+  "sha256": "de8e447f6cf248139e37d37c669721d6943702f8306d1b4aed3f3f908a1f611d",
+  "build_id": "1.1.6-de8e447f6cf2",
+  "build_time": "2026-05-27T04:47:05+00:00",
+  "release_id": "v1.1.6",
+  "release_notes": "STABLE release v1.1.6 - Production deployment finalization and single EXE runtime layout",
+  "notes": "STABLE release v1.1.6 - Production deployment finalization and single EXE runtime layout",
+  "minimum_supported_version": "1.1.6"
 }

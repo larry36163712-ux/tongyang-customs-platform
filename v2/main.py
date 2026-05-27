@@ -3,14 +3,12 @@ from __future__ import annotations
 import multiprocessing
 import importlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication
-
 from v2.core.runtime_log import log_exception, log_runtime
-from v2.ui.main_window import CustomsErpWindow
 
 
 def _run_runtime_self_test(output_path: str) -> int:
@@ -63,15 +61,29 @@ def main() -> int:
     startup_started = time.perf_counter()
     multiprocessing.freeze_support()
     _install_exception_hook()
+    if getattr(sys, "frozen", False):
+        try:
+            from v2.core.deployment import ensure_runtime_layout
+
+            deployment = ensure_runtime_layout(relaunch=True)
+            log_runtime("deployment finalizer " + json.dumps(deployment, ensure_ascii=False, sort_keys=True))
+            if deployment.get("relaunching"):
+                os._exit(0)
+        except Exception as exc:
+            log_exception("deployment finalizer failed", exc)
     log_runtime(
         "application startup "
         f"executable={sys.executable} argv={sys.argv} path_entries={len(sys.path)}"
     )
+    from PySide6.QtWidgets import QApplication
+
     app = QApplication(sys.argv)
     app.setApplicationName("通洋報關平台")
     app.setOrganizationName("Tong Yang")
 
     try:
+        from v2.ui.main_window import CustomsErpWindow
+
         window = CustomsErpWindow()
     except Exception as exc:
         log_exception("main window startup", exc)

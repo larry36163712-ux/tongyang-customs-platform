@@ -25,6 +25,13 @@ from v2.core.settings import (
     settings_path,
     version_debug_log,
 )
+from v2.core.deployment import (
+    cleanup_update_artifacts,
+    ensure_shortcuts,
+    inspect_shortcuts,
+    production_exe_path,
+    production_root,
+)
 
 ProgressCallback = Callable[[str, int, str], None]
 
@@ -279,6 +286,8 @@ class V2Updater:
         for dirty_dir in (config_dir / "temp_update", temp_dir / "temp_update", temp_dir / "TongYangCustomsPlatform.temp_update"):
             if dirty_dir.exists() and dirty_dir.is_dir():
                 removed.extend(self._remove_directory(dirty_dir, "reset temp update cleanup failed"))
+        if getattr(sys, "frozen", False):
+            removed.extend(cleanup_update_artifacts(production_root()))
         return removed
 
     def _remove_directory(self, path: Path, log_prefix: str) -> list[str]:
@@ -497,6 +506,8 @@ class V2Updater:
         pending = self._read_pending_manifest()
         state: dict[str, object] = {
             "executable_path": str(Path(sys.executable).resolve()),
+            "production_exe_path": str(production_exe_path()),
+            "production_root": str(production_root()),
             "frozen": bool(getattr(sys, "frozen", False)),
             "local_manifest_path": str(self.local_version_path),
             "pending_manifest_path": str(self.pending_manifest_path),
@@ -598,11 +609,11 @@ class V2Updater:
 
 
 def inspect_desktop_shortcuts(current_exe: str) -> list[dict[str, str]]:
-    return _shortcut_ps(current_exe, repair=False)
+    return inspect_shortcuts(Path(current_exe))
 
 
 def repair_desktop_shortcuts(current_exe: str) -> list[dict[str, str]]:
-    return _shortcut_ps(current_exe, repair=True)
+    return ensure_shortcuts(Path(current_exe))
 
 
 def _shortcut_ps(current_exe: str, repair: bool) -> list[dict[str, str]]:
@@ -665,6 +676,7 @@ $rows | ConvertTo-Json -Depth 4 -Compress
             timeout=12,
             env=env,
             check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except Exception:
         return []
