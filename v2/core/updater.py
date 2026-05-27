@@ -155,7 +155,7 @@ class V2Updater:
                 f"channel={self.settings.channel} remote_channel={manifest.channel} "
                 "compare_result=0 sha_match=True should_show_popup=False"
             )
-            return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest, compare, False)
+            return UpdateCheck("current", f"目前已是最新版 {self.current_version}。", manifest, 0, False)
         content_changed_same_version = compare == 0 and sha_changed
         should_show_popup = compare < 0 or content_changed_same_version
         self._log(
