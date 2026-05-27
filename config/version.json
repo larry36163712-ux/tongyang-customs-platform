@@ -1,14 +1,14 @@
 {
   "app_name": "通洋報關平台",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "channel": "stable",
   "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
   "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe",
-  "sha256": "38eb868f70af9f2fc9304ed87918d87ae91fc843d483d173384f625e8d4f3069",
-  "build_id": "1.1.7-38eb868f70af",
-  "build_time": "2026-05-27T04:52:33+00:00",
-  "release_id": "v1.1.7",
-  "release_notes": "STABLE release v1.1.7 - Production deployment finalization and updater state polish",
-  "notes": "STABLE release v1.1.7 - Production deployment finalization and updater state polish",
-  "minimum_supported_version": "1.1.7"
+  "sha256": "272137d5f1f1232988cf53b77a60523a0f8a51f0789b1ab521d2b56d4f956a91",
+  "build_id": "1.1.8-272137d5f1f1",
+  "build_time": "2026-05-27T07:08:10+00:00",
+  "release_id": "v1.1.8",
+  "release_notes": "STABLE release v1.1.8 - AI Semantic Customs Document Understanding Engine",
+  "notes": "STABLE release v1.1.8 - AI Semantic Customs Document Understanding Engine",
+  "minimum_supported_version": "1.1.8"
 }

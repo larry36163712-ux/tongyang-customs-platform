@@ -25,7 +25,7 @@ def _segment(name: str, text: str) -> DocumentSegment:
         confidence=0.0,
         document_confidence=candidates[0].confidence if candidates else 0.0,
         candidates=candidates,
-        manual_confirm_reason="版面解析不完整或辨識信心不足，需人工確認" if candidates and candidates[0].needs_manual_confirm else "",
+        manual_confirm_reason="AI 辨識信心不足，需人工確認文件類型。" if candidates and candidates[0].needs_manual_confirm else "",
     )
 
 
@@ -94,6 +94,18 @@ def main() -> None:
             "N0 OF 0RIGINAL B L THREE",
         ]
     )
+    shiken_ds2_text = "\n".join(
+        [
+            "海關進口報單",
+            "進口人 詩肯股份有限公司",
+            "稅則 4707.20",
+            "統計方式 02",
+            "完稅價格 CIF USD 30277.35",
+            "稅率 稅額 推貿費",
+            "船名航次 WAN HAI 293",
+            "件數 97 BLE 毛重 99,270 KG",
+        ]
+    )
 
     docs = [
         _segment("scan001.pdf", invoice_text),
@@ -134,6 +146,11 @@ def main() -> None:
         raise RuntimeError(f"OCR similarity matching failed for noisy B/L: {noisy_bl}")
     if "document_similarity" not in noisy_bl.score_breakdown:
         raise RuntimeError("noisy B/L did not use document similarity scoring")
+    shiken_ds2 = classifier.best(shiken_ds2_text, "詩肯JQ報單.PDF")
+    if shiken_ds2.document_type != DocumentType.DS2_DECLARATION:
+        raise RuntimeError(f"Shiken DS2 declaration was not recognized: {shiken_ds2}")
+    if shiken_ds2.confidence < 0.62:
+        raise RuntimeError(f"Shiken DS2 declaration confidence too low: {shiken_ds2.confidence}")
 
     cases = WorkflowMatcher().group_cases(docs, direction="import")
     if len(cases) != 1:

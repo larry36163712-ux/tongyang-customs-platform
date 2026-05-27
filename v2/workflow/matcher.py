@@ -202,7 +202,8 @@ class WorkflowMatcher:
             candidate.document_type
             for doc in docs
             for candidate in doc.candidates
-            if candidate.confidence >= 0.42 and candidate.document_type != DocumentType.UNKNOWN
+            if candidate.document_type != DocumentType.UNKNOWN
+            and candidate.confidence >= self._candidate_missing_threshold(candidate.document_type)
         }
         return [document_type.value for document_type in required if document_type not in present and document_type not in candidate_present]
 
@@ -214,7 +215,9 @@ class WorkflowMatcher:
                 f"{doc.source_name} ({int(candidate.confidence * 100)}%)"
                 for doc in docs
                 for candidate in doc.candidates
-                if candidate.document_type == document_type and candidate.confidence >= 0.42 and candidate.needs_manual_confirm
+                if candidate.document_type == document_type
+                and candidate.confidence >= self._candidate_missing_threshold(document_type)
+                and candidate.needs_manual_confirm
             ]
             if names:
                 result[document_type.value] = names
@@ -223,12 +226,12 @@ class WorkflowMatcher:
     def _manual_confirm_queue(self, docs: list[DocumentSegment], candidates: dict[str, list[str]]) -> list[str]:
         queue: list[str] = []
         for document_label, names in candidates.items():
-            queue.append(f"疑似 {document_label}：{', '.join(names)}")
+            queue.append(f"待人工確認 {document_label}: {', '.join(names)}")
         for doc in docs:
             if doc.manual_confirm_reason:
                 best = doc.candidates[0] if doc.candidates else None
                 label = best.document_type.value if best else doc.detected_type.value
-                queue.append(f"疑似 {label}：{doc.source_name}，{doc.manual_confirm_reason}")
+                queue.append(f"待人工確認 {label}: {doc.source_name}，{doc.manual_confirm_reason}")
         return self._dedupe(queue)
 
     def _effective_document_type(self, doc: DocumentSegment) -> DocumentType:
@@ -238,9 +241,22 @@ class WorkflowMatcher:
             return doc.detected_type
         if doc.candidates:
             best = doc.candidates[0]
-            if best.confidence >= 0.42:
+            if best.confidence >= self._candidate_missing_threshold(best.document_type):
                 return best.document_type
         return DocumentType.UNKNOWN
+
+    def _candidate_missing_threshold(self, document_type: DocumentType) -> float:
+        if document_type in {DocumentType.DS2_DECLARATION, DocumentType.EXPORT_DECLARATION}:
+            return 0.30
+        if document_type in {
+            DocumentType.ARRIVAL_NOTICE,
+            DocumentType.TAX_SHEET,
+            DocumentType.CLEARANCE_LIST,
+            DocumentType.MATERIAL_CLEARANCE,
+            DocumentType.DRAWBACK_CLEARANCE,
+        }:
+            return 0.36
+        return 0.42
 
     def _complementary_customs_documents(self, left: DocumentSegment, right: DocumentSegment) -> bool:
         left_type = self._effective_document_type(left)

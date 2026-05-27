@@ -75,7 +75,15 @@ def main() -> int:
         "application startup "
         f"executable={sys.executable} argv={sys.argv} path_entries={len(sys.path)}"
     )
+    os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+    os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+    os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt
+
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
 
     app = QApplication(sys.argv)
     app.setApplicationName("通洋報關平台")

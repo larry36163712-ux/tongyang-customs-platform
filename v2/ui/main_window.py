@@ -450,6 +450,7 @@ class CustomsErpWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("通洋報關平台")
         self.resize(1320, 860)
+        self.setMinimumSize(1180, 760)
 
         self.settings: V2Settings = load_settings()
         self.parser = SemanticParserEngine()
@@ -675,8 +676,8 @@ class CustomsErpWindow(QMainWindow):
         document_cards.itemClicked.connect(lambda item, view=view_name: self._on_document_card_clicked(item, view))
 
         compare_table = QTableWidget()
-        compare_table.setColumnCount(6)
-        compare_table.setHorizontalHeaderLabels(["欄位名稱", "INV", "PACKING", "B/L", "報單", "結果"])
+        compare_table.setColumnCount(2)
+        compare_table.setHorizontalHeaderLabels(["欄位名稱", "結果"])
         compare_table.setObjectName("CompareTable")
         compare_table.verticalHeader().setVisible(False)
         compare_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -684,9 +685,9 @@ class CustomsErpWindow(QMainWindow):
         compare_table.setMinimumHeight(260)
 
         compare_search = QLineEdit()
-        compare_search.setPlaceholderText("搜尋欄位或差異原因")
+        compare_search.setPlaceholderText("搜尋欄位或文件")
         compare_search.setObjectName("CompareSearch")
-        compare_only_issues = QCheckBox("只看需確認項目")
+        compare_only_issues = QCheckBox("只看待確認 / 異常")
         compare_only_issues.setChecked(False)
         compare_search.textChanged.connect(lambda _text, view=view_name: self._apply_compare_filters(view))
         compare_only_issues.toggled.connect(lambda _checked, view=view_name: self._apply_compare_filters(view))
@@ -769,7 +770,7 @@ class CustomsErpWindow(QMainWindow):
         body.addWidget(audit_workspace)
         body.setStretchFactor(0, 35)
         body.setStretchFactor(1, 65)
-        body.setSizes([430, 810])
+        body.setSizes([460, 860])
         layout.addWidget(body, 1)
         self.workflow_views[view_name] = {
             "tree": None,
@@ -1399,6 +1400,13 @@ class CustomsErpWindow(QMainWindow):
             self._document_label(segment.parsed.document_type if segment.parsed else segment.detected_type)
             for segment in result.segments
         }
+        candidate_found = {
+            self._document_label(candidate.document_type)
+            for segment in result.segments
+            for candidate in segment.candidates
+            if candidate.document_type != DocumentType.UNKNOWN and candidate.confidence >= 0.30
+        }
+        found |= candidate_found
         required = ["DS2 報單", "INV", "PKG", "B/L"] if result.direction != "export" else ["出口報單", "INV", "PKG", "BOOKING", "B/L"]
         return [name for name in required if name not in found and not (name == "PKG" and "PL / PKG" in found)]
 
@@ -1408,8 +1416,15 @@ class CustomsErpWindow(QMainWindow):
         order = [
             ("invoice", "✓ 發票 INV"),
             ("packing", "✓ 包裝單 PACKING"),
+            ("arrival_notice", "⚠ 到貨通知"),
+            ("delivery_order", "⚠ D/O"),
+            ("shipping_order", "⚠ SO"),
+            ("booking", "⚠ Booking"),
+            ("bl", "✓ B/L"),
             ("declaration", "⚠ 報單"),
-            ("bl", "✗ B/L"),
+            ("tax_sheet", "⚠ 稅單"),
+            ("clearance_list", "⚠ 清表"),
+            ("drawback_standard", "⚠ 核退標準"),
             ("unknown", "⚠ 尚未成功辨識"),
         ]
         for key, title in order:
@@ -1433,13 +1448,27 @@ class CustomsErpWindow(QMainWindow):
             list_widget.addItem(QListWidgetItem("⚠ 尚未成功辨識\n請確認檔案是否可開啟，或重新上傳較清楚的文件。"))
 
     def _document_groups(self, case: CaseWorkflow) -> dict[str, list[str]]:
-        groups = {"invoice": [], "packing": [], "declaration": [], "bl": [], "unknown": []}
+        groups = {
+            "invoice": [],
+            "packing": [],
+            "arrival_notice": [],
+            "delivery_order": [],
+            "shipping_order": [],
+            "booking": [],
+            "bl": [],
+            "declaration": [],
+            "tax_sheet": [],
+            "clearance_list": [],
+            "drawback_standard": [],
+            "unknown": [],
+        }
         for segment in case.documents:
             doc_type = self._segment_effective_type(segment)
             suffix = ""
             best = segment.candidates[0] if segment.candidates else None
             if best and best.needs_manual_confirm:
-                suffix = f"（Confidence：{int(best.confidence * 100)}%，AI低信心待確認）"
+                reason = segment.manual_confirm_reason or "AI 辨識信心不足，需人工確認"
+                suffix = f"\nAI 信心：{int(best.confidence * 100)}%\n狀態：需人工確認\n原因：{reason}"
             if doc_type == DocumentType.INVOICE:
                 groups["invoice"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.PACKING_LIST:
@@ -1448,8 +1477,24 @@ class CustomsErpWindow(QMainWindow):
                 groups["declaration"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.BILL_OF_LADING:
                 groups["bl"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.ARRIVAL_NOTICE:
+                groups["arrival_notice"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.SHIPPING_ORDER:
+                groups["shipping_order"].append(segment.source_name + suffix)
+            elif doc_type in {DocumentType.BOOKING, DocumentType.BOOKING_CONFIRMATION}:
+                groups["booking"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.TAX_SHEET:
+                groups["tax_sheet"].append(segment.source_name + suffix)
+            elif doc_type in {DocumentType.CLEARANCE_LIST, DocumentType.DATA_CLEARANCE, DocumentType.MATERIAL_CLEARANCE}:
+                groups["clearance_list"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.DRAWBACK_CLEARANCE:
+                groups["drawback_standard"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.UNKNOWN:
                 groups["unknown"].append(segment.source_name)
+        for document_key, names in case.fallback_document_candidates.items():
+            key = self._source_to_evidence_key(document_key)
+            if key in groups and not groups[key]:
+                groups[key].extend(f"疑似文件：{name}" for name in names)
         return groups
 
     def _segment_effective_type(self, segment) -> DocumentType:
@@ -1460,7 +1505,7 @@ class CustomsErpWindow(QMainWindow):
             return segment.detected_type
         if segment.candidates:
             best = segment.candidates[0]
-            if best.confidence >= 0.42:
+            if best.confidence >= (0.30 if best.document_type in {DocumentType.DS2_DECLARATION, DocumentType.EXPORT_DECLARATION} else 0.42):
                 return best.document_type
         return DocumentType.UNKNOWN
 
@@ -1470,6 +1515,13 @@ class CustomsErpWindow(QMainWindow):
             "packing": "✗ 包裝單 PACKING\n尚未提供",
             "declaration": "⚠ 報單\n尚未成功辨識\n可能為掃描品質或格式問題",
             "bl": "✗ B/L\n尚未提供",
+            "arrival_notice": "",
+            "delivery_order": "",
+            "shipping_order": "",
+            "booking": "",
+            "tax_sheet": "",
+            "clearance_list": "",
+            "drawback_standard": "",
             "unknown": "",
         }
         if not files:
@@ -1478,7 +1530,8 @@ class CustomsErpWindow(QMainWindow):
             return "⚠ 尚未成功辨識\n" + "\n".join(files[:4]) + "\n可能為掃描品質、格式或文件內容不足，請人工確認。"
         status_title = title
         if key == "declaration":
-            status_title = "✓ 報單"
+            warning = any("需人工確認" in file or "疑似文件" in file for file in files)
+            status_title = "⚠ 已收到疑似 DS2 報單" if warning else "✓ 報單"
         elif key == "bl":
             status_title = "✓ B/L"
         return status_title + "\n" + "\n".join(files[:5])
@@ -1551,6 +1604,23 @@ class CustomsErpWindow(QMainWindow):
             "BILL_OF_LADING": "B/L",
             "PACKING_LIST": "PACKING",
             "INVOICE": "INV",
+            "ARRIVAL_NOTICE": "到貨通知",
+            "SHIPPING_ORDER": "SO",
+            "BOOKING_CONFIRMATION": "Booking",
+            "BOOKING": "Booking",
+            "TAX_SHEET": "稅單",
+            "CLEARANCE_LIST": "清表",
+            "DATA_CLEARANCE": "資料清表",
+            "MATERIAL_CLEARANCE": "用料清表",
+            "DRAWBACK_CLEARANCE": "核退標準",
+            "arrival_notice": "到貨通知",
+            "delivery_order": "D/O",
+            "shipping_order": "SO",
+            "tax_sheet": "稅單",
+            "clearance_list": "清表",
+            "material_clearance": "用料清表",
+            "drawback_standard": "核退標準",
+            "declaration": "報單",
         }
         for raw, label in mapping.items():
             text = text.replace(raw, label)
@@ -1569,6 +1639,10 @@ class CustomsErpWindow(QMainWindow):
         }
         for raw, label in replacements.items():
             text = text.replace(raw, label)
+        if "WARNING_" in text or "COMPARE_" in text:
+            return "文件需人工確認"
+        if "traceback" in text.casefold():
+            return "處理細節已寫入 logs/runtime.log"
         return text
 
     def _update_workflow_section_states(self, case: CaseWorkflow, view_name: str = "case") -> None:
@@ -1788,18 +1862,30 @@ class CustomsErpWindow(QMainWindow):
         table.setSortingEnabled(False)
         report = case.audit_report
         results = report.results if report else []
+        columns = self._evidence_columns(case, results)
+        headers = ["欄位名稱", *[label for _key, label in columns], "結果"]
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
         if not results:
-            fallback_rows = []
+            fallback_rows: list[list[str]] = []
             if case.missing_documents:
-                fallback_rows.extend((missing, "-", "-", "-", "-", "✗ 待補件") for missing in case.missing_documents)
+                for missing in case.missing_documents:
+                    fallback_rows.append([self._human_document_name(missing), *["未提供" for _ in columns], "✗ 待補件"])
+            for document_type, names in case.fallback_document_candidates.items():
+                values = ["-" for _ in columns]
+                for index, (key, _label) in enumerate(columns):
+                    if key == document_type:
+                        values[index] = "；".join(names[:3])
+                fallback_rows.append([self._human_document_name(document_type), *values, "⚠ 已收到疑似文件，待人工確認"])
             if case.rule_findings:
-                fallback_rows.extend(("人工確認", "-", "-", "-", "-", self._humanize_warning(finding)) for finding in case.rule_findings)
+                fallback_rows.extend(["人工確認", *["-" for _ in columns], self._humanize_warning(finding)] for finding in case.rule_findings)
             if not fallback_rows:
-                fallback_rows.append(("欄位核對", "-", "-", "-", "-", "⚠ 文件不足，待補件"))
+                fallback_rows.append(["欄位核對", *["-" for _ in columns], "⚠ 文件不足，待補件"])
             table.setRowCount(len(fallback_rows))
             for row, cells in enumerate(fallback_rows):
                 for col, value in enumerate(cells):
                     item = QTableWidgetItem(value)
+                    self._style_table_item(item, "warning" if col == table.columnCount() - 1 else "neutral")
                     if col == table.columnCount() - 1:
                         item.setBackground(QBrush(QColor("#FFF3CD")))
                     table.setItem(row, col, item)
@@ -1821,17 +1907,13 @@ class CustomsErpWindow(QMainWindow):
         }
         for row, result in enumerate(results):
             by_type = self._document_values_for_field(case, result.field)
-            cells = [
-                FIELD_LABELS.get(result.field.value, result.field.value),
-                by_type.get("invoice", "-"),
-                by_type.get("packing", "-"),
-                by_type.get("bl", "-"),
-                result.declaration_value or "-",
-                self._audit_result_label(result, label_by_status.get(result.status, result.status.value)),
-            ]
+            cells = [FIELD_LABELS.get(result.field.value, result.field.value)]
+            cells.extend(by_type.get(key, "-") for key, _label in columns)
+            cells.append(self._audit_result_label(result, label_by_status.get(result.status, result.status.value)))
             for col, value in enumerate(cells):
                 item = QTableWidgetItem(value)
                 item.setToolTip(result.message)
+                self._style_table_item(item, self._status_style_key(result.status))
                 table.setItem(row, col, item)
             status_item = table.item(row, table.columnCount() - 1)
             status_item.setToolTip(result.status.value)
@@ -1850,7 +1932,7 @@ class CustomsErpWindow(QMainWindow):
         table.resizeColumnsToContents()
 
     def _document_values_for_field(self, case: CaseWorkflow, field) -> dict[str, str]:
-        values = {"invoice": "-", "packing": "-", "bl": "-"}
+        values: dict[str, str] = {}
         for segment in case.documents:
             parsed = segment.parsed
             if not parsed:
@@ -1858,13 +1940,10 @@ class CustomsErpWindow(QMainWindow):
             value = self._parsed_field_value(parsed, field)
             if not value:
                 continue
-            if parsed.document_type == DocumentType.INVOICE:
-                values["invoice"] = value
-            elif parsed.document_type == DocumentType.PACKING_LIST:
-                values["packing"] = value
-            elif parsed.document_type == DocumentType.BILL_OF_LADING:
-                values["bl"] = value
-        if any(value != "-" for value in values.values()):
+            key = self._evidence_key(self._segment_effective_type(segment))
+            if key:
+                values[key] = value
+        if values:
             return values
         report = case.audit_report
         if report:
@@ -1872,19 +1951,123 @@ class CustomsErpWindow(QMainWindow):
                 if result.field != field:
                     continue
                 for source, value in result.document_values.items():
-                    source_key = source.casefold()
-                    if "inv" in source_key or "invoice" in source_key:
-                        values["invoice"] = value
-                    elif "pack" in source_key or "pkg" in source_key or "pl" in source_key:
-                        values["packing"] = value
-                    elif "b/l" in source_key or "bl" in source_key or "lading" in source_key:
-                        values["bl"] = value
+                    key = self._source_to_evidence_key(source)
+                    if key:
+                        values[key] = value
                 break
         return values
 
+    def _evidence_columns(self, case: CaseWorkflow, results) -> list[tuple[str, str]]:
+        order = [
+            DocumentType.INVOICE,
+            DocumentType.PACKING_LIST,
+            DocumentType.SHIPPING_ORDER,
+            DocumentType.BOOKING,
+            DocumentType.BILL_OF_LADING,
+            DocumentType.ARRIVAL_NOTICE,
+            DocumentType.DS2_DECLARATION,
+            DocumentType.EXPORT_DECLARATION,
+            DocumentType.TAX_SHEET,
+            DocumentType.CLEARANCE_LIST,
+            DocumentType.MATERIAL_CLEARANCE,
+            DocumentType.DRAWBACK_CLEARANCE,
+        ]
+        keys: list[str] = []
+        labels: dict[str, str] = {}
+        for document_type in order:
+            key = self._evidence_key(document_type)
+            if key:
+                labels[key] = self._document_label(document_type)
+        labels["declaration"] = "出口報單" if case.direction == "export" else "DS2 報單"
+        for segment in case.documents:
+            key = self._evidence_key(self._segment_effective_type(segment))
+            if key and key not in keys:
+                keys.append(key)
+        for document_type in case.fallback_document_candidates:
+            key = self._source_to_evidence_key(document_type)
+            if key and key not in keys:
+                keys.append(key)
+        if results:
+            for result in results:
+                for source in result.document_values:
+                    key = self._source_to_evidence_key(source)
+                    if key and key not in keys:
+                        keys.append(key)
+        if case.direction != "export":
+            for document_type in (DocumentType.INVOICE, DocumentType.PACKING_LIST, DocumentType.ARRIVAL_NOTICE, DocumentType.DS2_DECLARATION):
+                key = self._evidence_key(document_type)
+                if key and key not in keys and (key == "declaration" or key in case.fallback_document_candidates):
+                    keys.append(key)
+        ordered_keys = [self._evidence_key(document_type) for document_type in order]
+        keys.sort(key=lambda key: ordered_keys.index(key) if key in ordered_keys else 999)
+        return [(key, labels.get(key, self._human_document_name(key))) for key in keys if key]
+
+    def _evidence_key(self, document_type: DocumentType) -> str:
+        mapping = {
+            DocumentType.INVOICE: "invoice",
+            DocumentType.PACKING_LIST: "packing",
+            DocumentType.BILL_OF_LADING: "bl",
+            DocumentType.ARRIVAL_NOTICE: "arrival_notice",
+            DocumentType.SHIPPING_ORDER: "shipping_order",
+            DocumentType.BOOKING: "booking",
+            DocumentType.BOOKING_CONFIRMATION: "booking",
+            DocumentType.DS2_DECLARATION: "declaration",
+            DocumentType.EXPORT_DECLARATION: "declaration",
+            DocumentType.TAX_SHEET: "tax_sheet",
+            DocumentType.CLEARANCE_LIST: "clearance_list",
+            DocumentType.DATA_CLEARANCE: "clearance_list",
+            DocumentType.MATERIAL_CLEARANCE: "material_clearance",
+            DocumentType.DRAWBACK_CLEARANCE: "drawback_standard",
+        }
+        return mapping.get(document_type, "")
+
+    def _source_to_evidence_key(self, source: str) -> str:
+        text = str(source).casefold()
+        if "invoice" in text or "inv" in text or "發票" in text:
+            return "invoice"
+        if "pack" in text or "pkg" in text or "packing" in text or "裝箱" in text or "包裝" in text:
+            return "packing"
+        if "arrival" in text or "到貨" in text or "抵港" in text:
+            return "arrival_notice"
+        if "d/o" in text or "delivery order" in text or "提貨" in text:
+            return "delivery_order"
+        if "s/o" in text or "shipping order" in text:
+            return "shipping_order"
+        if "booking" in text or "訂艙" in text:
+            return "booking"
+        if "b/l" in text or "bl" in text or "lading" in text or "提單" in text:
+            return "bl"
+        if "ds2" in text or "declaration" in text or "報單" in text:
+            return "declaration"
+        if "稅單" in text or "tax" in text or "duty" in text:
+            return "tax_sheet"
+        if "核退" in text:
+            return "drawback_standard"
+        if "用料" in text:
+            return "material_clearance"
+        if "清表" in text:
+            return "clearance_list"
+        return ""
+
+    def _status_style_key(self, status: CheckStatus) -> str:
+        if status == CheckStatus.MATCH:
+            return "ok"
+        if status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK}:
+            return "error"
+        return "warning"
+
+    def _style_table_item(self, item: QTableWidgetItem, state: str) -> None:
+        foreground = {
+            "ok": "#14532D",
+            "warning": "#5B4A20",
+            "error": "#7F1D1D",
+            "neutral": "#1F2937",
+        }.get(state, "#1F2937")
+        item.setForeground(QBrush(QColor(foreground)))
+
     def _parsed_field_value(self, document: ParsedDocument, field) -> str:
         for parsed_field in document.fields:
-            if parsed_field.name == field:
+            if parsed_field.canonical == field:
                 return str(parsed_field.value).strip()
         return ""
 
@@ -2860,6 +3043,14 @@ class CustomsErpWindow(QMainWindow):
             }
             QTableWidget::item, QTreeWidget::item {
                 padding: 6px 8px;
+            }
+            QTableWidget::item:selected, QTreeWidget::item:selected {
+                background: #256D83;
+                color: #FFFFFF;
+            }
+            QTableWidget::item:disabled, QTreeWidget::item:disabled {
+                background: #18212B;
+                color: #7E8B99;
             }
             QProgressBar {
                 background: #10161D;
