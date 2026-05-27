@@ -11,6 +11,7 @@ class DocumentType(str, Enum):
     PACKING_LIST = "PKG"
     BILL_OF_LADING = "B/L"
     ARRIVAL_NOTICE = "到貨通知"
+    DELIVERY_ORDER = "D/O"
     CLEARANCE_LIST = "清表"
     DATA_CLEARANCE = "資料清表"
     MATERIAL_CLEARANCE = "用料清表"

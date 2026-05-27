@@ -15,6 +15,9 @@ APP_DISPLAY_NAME = "通洋報關平台"
 
 
 def production_root() -> Path:
+    program_files = os.environ.get("ProgramFiles")
+    if program_files:
+        return Path(program_files) / APP_DIR_NAME
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         return Path(local_app_data) / APP_DIR_NAME

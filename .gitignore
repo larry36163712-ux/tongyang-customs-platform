@@ -4,6 +4,7 @@ __pycache__/
 build/
 dist/
 _release_work/
+installer_payload/
 
 logs/
 parser_cache/

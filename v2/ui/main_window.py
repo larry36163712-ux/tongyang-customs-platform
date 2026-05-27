@@ -13,6 +13,7 @@ import traceback
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QAction, QBrush, QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -66,6 +67,7 @@ DOCUMENT_LABELS = {
     DocumentType.PACKING_LIST: "PKG",
     DocumentType.BILL_OF_LADING: "B/L",
     DocumentType.ARRIVAL_NOTICE: "到貨通知",
+    DocumentType.DELIVERY_ORDER: "D/O",
     DocumentType.CLEARANCE_LIST: "清表",
     DocumentType.DATA_CLEARANCE: "資料清表",
     DocumentType.MATERIAL_CLEARANCE: "用料清表",
@@ -449,8 +451,8 @@ class CustomsErpWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("通洋報關平台")
-        self.resize(1320, 860)
-        self.setMinimumSize(1180, 760)
+        self.resize(1440, 900)
+        self.setMinimumSize(1280, 780)
 
         self.settings: V2Settings = load_settings()
         self.parser = SemanticParserEngine()
@@ -603,15 +605,17 @@ class CustomsErpWindow(QMainWindow):
         layout.addLayout(header_row)
 
         upload_panel = WorkflowDropPanel()
-        upload_panel.setMaximumHeight(140)
+        upload_panel.setMaximumHeight(128)
         upload_panel.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
         upload_layout = QVBoxLayout(upload_panel)
-        upload_layout.setContentsMargins(14, 10, 14, 10)
-        upload_layout.setSpacing(8)
+        upload_layout.setContentsMargins(16, 10, 16, 10)
+        upload_layout.setSpacing(7)
         upload_top = QHBoxLayout()
         upload_list = DocumentDropList()
-        upload_list.setMaximumHeight(58)
+        upload_list.setMaximumHeight(48)
         upload_list.addItem("拖曳 PDF / JPG / PNG / XLSX / CSV / TXT 或整個資料夾到這裡")
+        upload_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        upload_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         upload_list.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
         upload_button = QPushButton("選擇文件")
         upload_button.clicked.connect(lambda: self._choose_workflow_documents(mode.currentText(), view_name))
@@ -672,7 +676,8 @@ class CustomsErpWindow(QMainWindow):
 
         document_cards = QListWidget()
         document_cards.setObjectName("DocumentCards")
-        document_cards.setSpacing(8)
+        document_cards.setSpacing(10)
+        document_cards.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         document_cards.itemClicked.connect(lambda item, view=view_name: self._on_document_card_clicked(item, view))
 
         compare_table = QTableWidget()
@@ -681,8 +686,13 @@ class CustomsErpWindow(QMainWindow):
         compare_table.setObjectName("CompareTable")
         compare_table.verticalHeader().setVisible(False)
         compare_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        compare_table.horizontalHeader().setStretchLastSection(True)
+        compare_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        compare_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        compare_table.setWordWrap(True)
         compare_table.setSortingEnabled(True)
-        compare_table.setMinimumHeight(260)
+        compare_table.setMinimumHeight(430)
+        compare_table.verticalHeader().setDefaultSectionSize(46)
 
         compare_search = QLineEdit()
         compare_search.setPlaceholderText("搜尋欄位或文件")
@@ -696,12 +706,17 @@ class CustomsErpWindow(QMainWindow):
         audit_report_view.setReadOnly(True)
         audit_report_view.setObjectName("AuditReportView")
         audit_report_view.setPlaceholderText("完成文件讀取後，這裡會產生正式報關核對報告")
-        audit_report_view.setMaximumHeight(210)
+        audit_report_view.setMaximumHeight(170)
+        audit_report_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        audit_report_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         audit_summary = QTextEdit()
         audit_summary.setReadOnly(True)
         audit_summary.setObjectName("RiskSummaryCard")
         audit_summary.setPlaceholderText("異常摘要 / 高風險提示")
+        audit_summary.setMaximumHeight(150)
+        audit_summary.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        audit_summary.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.workflow_debug = QTextEdit()
         self.workflow_debug.setReadOnly(True)
@@ -716,8 +731,8 @@ class CustomsErpWindow(QMainWindow):
         left_panel = QFrame()
         left_panel.setObjectName("AuditSidePanel")
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(10)
+        left_layout.setContentsMargins(4, 4, 4, 4)
+        left_layout.setSpacing(12)
         left_title = QLabel("報關案件文件區")
         left_title.setObjectName("PanelTitle")
         left_layout.addWidget(left_title)
@@ -727,8 +742,8 @@ class CustomsErpWindow(QMainWindow):
         audit_workspace = QFrame()
         audit_workspace.setObjectName("AuditWorkspace")
         center = QVBoxLayout(audit_workspace)
-        center.setContentsMargins(0, 0, 0, 0)
-        center.setSpacing(10)
+        center.setContentsMargins(4, 4, 4, 4)
+        center.setSpacing(12)
         status_line = QHBoxLayout()
         status_label = QLabel("● 等待文件")
         status_label.setObjectName("AuditStatusBadge")
@@ -740,7 +755,7 @@ class CustomsErpWindow(QMainWindow):
         report_title = QLabel("案件摘要 / AI 建議")
         report_title.setObjectName("PanelTitle")
         center.addWidget(report_title)
-        center.addWidget(audit_report_view)
+        center.addWidget(audit_report_view, 1)
         table_tools = QHBoxLayout()
         table_title = QLabel("海關核對差異表")
         table_title.setObjectName("PanelTitle")
@@ -749,7 +764,7 @@ class CustomsErpWindow(QMainWindow):
         table_tools.addWidget(compare_search)
         table_tools.addWidget(compare_only_issues)
         center.addLayout(table_tools)
-        center.addWidget(compare_table, 4)
+        center.addWidget(compare_table, 7)
 
         risk_panel = QFrame()
         risk_panel.setObjectName("AuditSummaryPanel")
@@ -762,15 +777,15 @@ class CustomsErpWindow(QMainWindow):
         summary_layout.addWidget(audit_summary)
         summary_layout.addWidget(debug_toggle)
         summary_layout.addWidget(self.workflow_debug)
-        center.addWidget(risk_panel, 1)
+        center.addWidget(risk_panel, 2)
         self.workflow_debug.hide()
         debug_toggle.setVisible(self.settings.developer_mode)
 
         body.addWidget(left_panel)
         body.addWidget(audit_workspace)
-        body.setStretchFactor(0, 35)
-        body.setStretchFactor(1, 65)
-        body.setSizes([460, 860])
+        body.setStretchFactor(0, 30)
+        body.setStretchFactor(1, 70)
+        body.setSizes([390, 910])
         layout.addWidget(body, 1)
         self.workflow_views[view_name] = {
             "tree": None,
@@ -1332,7 +1347,7 @@ class CustomsErpWindow(QMainWindow):
         return "\n".join(lines)
 
     def _risk_level_label(self, case: CaseWorkflow) -> str:
-        if case.missing_documents:
+        if self._effective_missing_documents(case):
             return "中風險"
         if case.audit_report and any(result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK} for result in case.audit_report.results):
             return "高風險"
@@ -1342,8 +1357,9 @@ class CustomsErpWindow(QMainWindow):
 
     def _risk_reason_lines(self, case: CaseWorkflow) -> list[str]:
         lines: list[str] = []
-        if case.missing_documents:
-            lines.append(f"缺少 {'、'.join(self._human_document_name(name) for name in case.missing_documents)}，目前尚無法完成最終海關核對。")
+        missing_documents = self._effective_missing_documents(case)
+        if missing_documents:
+            lines.append(f"缺少 {'、'.join(self._human_document_name(name) for name in missing_documents)}，目前尚無法完成最終海關核對。")
         if case.manual_confirm_queue:
             lines.append("已收到部分疑似文件，但辨識信心不足，需人工確認文件類型。")
         if case.audit_report:
@@ -1357,7 +1373,7 @@ class CustomsErpWindow(QMainWindow):
         return lines
 
     def _ai_recommendation(self, case: CaseWorkflow) -> str:
-        if case.missing_documents:
+        if self._effective_missing_documents(case):
             return "請先補齊缺少文件，再進行稅則、金額、重量與船名航次最終核對。"
         if case.audit_report and any(result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK} for result in case.audit_report.results):
             return "請優先確認紅色差異欄位，必要時回查發票、裝箱單與報單原始資料。"
@@ -1391,9 +1407,24 @@ class CustomsErpWindow(QMainWindow):
     def _audit_status_badge(self, case: CaseWorkflow) -> str:
         if self._case_status_key(case) == "completed":
             return "● 已完成"
-        if case.missing_documents:
+        if self._effective_missing_documents(case):
             return "● 需補件"
         return "● AI 核對中"
+
+    def _effective_missing_documents(self, case: CaseWorkflow) -> list[str]:
+        """Hide missing-state noise when there is a real low-confidence candidate.
+
+        ERP users should see "待人工確認" for uploaded but low-confidence DS2/B/L
+        candidates, not a hard missing state.
+        """
+
+        candidates = {str(key) for key in case.fallback_document_candidates}
+        candidate_keys = {self._source_to_evidence_key(key) for key in candidates}
+        return [
+            missing
+            for missing in case.missing_documents
+            if str(missing) not in candidates and self._source_to_evidence_key(missing) not in candidate_keys
+        ]
 
     def _infer_missing_documents_from_segments(self, result: WorkflowResult) -> list[str]:
         found = {
@@ -1430,6 +1461,8 @@ class CustomsErpWindow(QMainWindow):
         for key, title in order:
             files = groups.get(key, [])
             text = self._document_card_text(key, title, files, case)
+            if not text.strip():
+                continue
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, {"type": key, "files": files})
             item.setSizeHint(item.sizeHint().expandedTo(item.sizeHint()))
@@ -1479,6 +1512,8 @@ class CustomsErpWindow(QMainWindow):
                 groups["bl"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.ARRIVAL_NOTICE:
                 groups["arrival_notice"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.DELIVERY_ORDER:
+                groups["delivery_order"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.SHIPPING_ORDER:
                 groups["shipping_order"].append(segment.source_name + suffix)
             elif doc_type in {DocumentType.BOOKING, DocumentType.BOOKING_CONFIRMATION}:
@@ -1577,8 +1612,9 @@ class CustomsErpWindow(QMainWindow):
 
     def _format_risk_summary(self, case: CaseWorkflow) -> str:
         lines: list[str] = []
-        if case.missing_documents:
-            for missing in case.missing_documents:
+        missing_documents = self._effective_missing_documents(case)
+        if missing_documents:
+            for missing in missing_documents:
                 lines.append(f"✗ 缺少 {self._human_document_name(missing)}")
         for item in case.manual_confirm_queue:
             lines.append(f"⚠ {self._humanize_warning(item)}")
@@ -1605,6 +1641,7 @@ class CustomsErpWindow(QMainWindow):
             "PACKING_LIST": "PACKING",
             "INVOICE": "INV",
             "ARRIVAL_NOTICE": "到貨通知",
+            "DELIVERY_ORDER": "D/O",
             "SHIPPING_ORDER": "SO",
             "BOOKING_CONFIRMATION": "Booking",
             "BOOKING": "Booking",
@@ -1890,7 +1927,7 @@ class CustomsErpWindow(QMainWindow):
                         item.setBackground(QBrush(QColor("#FFF3CD")))
                     table.setItem(row, col, item)
             table.setSortingEnabled(True)
-            table.resizeColumnsToContents()
+            table.resizeRowsToContents()
             return
         table.setRowCount(len(results))
         color_by_status = {
@@ -1929,7 +1966,7 @@ class CustomsErpWindow(QMainWindow):
                     if cell:
                         cell.setBackground(QBrush(QColor("#FFF3CD")))
         table.setSortingEnabled(True)
-        table.resizeColumnsToContents()
+        table.resizeRowsToContents()
 
     def _document_values_for_field(self, case: CaseWorkflow, field) -> dict[str, str]:
         values: dict[str, str] = {}
@@ -1965,6 +2002,7 @@ class CustomsErpWindow(QMainWindow):
             DocumentType.BOOKING,
             DocumentType.BILL_OF_LADING,
             DocumentType.ARRIVAL_NOTICE,
+            DocumentType.DELIVERY_ORDER,
             DocumentType.DS2_DECLARATION,
             DocumentType.EXPORT_DECLARATION,
             DocumentType.TAX_SHEET,
@@ -2008,6 +2046,7 @@ class CustomsErpWindow(QMainWindow):
             DocumentType.PACKING_LIST: "packing",
             DocumentType.BILL_OF_LADING: "bl",
             DocumentType.ARRIVAL_NOTICE: "arrival_notice",
+            DocumentType.DELIVERY_ORDER: "delivery_order",
             DocumentType.SHIPPING_ORDER: "shipping_order",
             DocumentType.BOOKING: "booking",
             DocumentType.BOOKING_CONFIRMATION: "booking",
@@ -3328,6 +3367,119 @@ class CustomsErpWindow(QMainWindow):
                 padding: 6px 10px;
                 background: #EEF2F6;
                 border-radius: 8px;
+            }
+            /* Final production ERP readability */
+            QWidget {
+                font-size: 15px;
+            }
+            #PageTitle {
+                font-size: 26px;
+                font-weight: 800;
+            }
+            #PanelTitle {
+                font-size: 16px;
+                font-weight: 800;
+                padding: 2px 0;
+            }
+            #WorkflowUpload {
+                min-height: 108px;
+                max-height: 128px;
+            }
+            QListWidget#UploadList {
+                background: #F8FAFC;
+                color: #334155;
+                border: 1px dashed #94A3B8;
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 15px;
+            }
+            #AuditSplitter::handle {
+                background: #D8DEE6;
+                width: 7px;
+            }
+            #AuditSidePanel, #AuditWorkspace, #AuditSummaryPanel {
+                background: #FFFFFF;
+                border: 1px solid #D8DEE6;
+                border-radius: 8px;
+            }
+            #DocumentStatusBar {
+                background: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+            }
+            #DocumentCards::item {
+                color: #1F2A37;
+                background: #F8FAFC;
+                border: 1px solid #D8DEE6;
+                border-radius: 8px;
+                padding: 14px;
+                margin: 0 0 10px 0;
+                min-height: 94px;
+            }
+            #DocumentCards::item:selected {
+                color: #0F172A;
+                background: #E6F2F7;
+                border: 1px solid #256D83;
+            }
+            QTableWidget#CompareTable {
+                background: #FFFFFF;
+                alternate-background-color: #F8FAFC;
+                color: #111827;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
+                gridline-color: #E2E8F0;
+                font-size: 15px;
+                selection-background-color: #D8EBF2;
+                selection-color: #111827;
+            }
+            QTableWidget#CompareTable::item {
+                color: #111827;
+                padding: 10px 12px;
+            }
+            QTableWidget#CompareTable::item:selected {
+                background: #D8EBF2;
+                color: #111827;
+            }
+            QHeaderView::section {
+                background: #EDF2F7;
+                color: #111827;
+                padding: 10px 12px;
+                font-size: 15px;
+                font-weight: 800;
+            }
+            QTextEdit#AuditReportView {
+                color: #1F2937;
+                background: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                padding: 18px 20px;
+                font-size: 16px;
+                line-height: 1.55;
+            }
+            QTextEdit#RiskSummaryCard {
+                color: #4A3410;
+                background: #FFF7E6;
+                border: 1px solid #F2C46D;
+                border-left: 5px solid #D99822;
+                padding: 14px 16px;
+                font-size: 15px;
+                line-height: 1.5;
+            }
+            QScrollBar:horizontal {
+                height: 0;
+                background: transparent;
+            }
+            QScrollBar::handle:horizontal {
+                height: 0;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                width: 10px;
+                background: #F1F5F9;
+            }
+            QScrollBar::handle:vertical {
+                background: #CBD5E1;
+                border-radius: 5px;
+                min-height: 32px;
             }
             QDialog {
                 background: #FFFFFF;

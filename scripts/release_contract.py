@@ -10,7 +10,8 @@ import urllib.request
 from dataclasses import dataclass
 
 
-REQUIRED_ASSETS = ("TongYangCustomsPlatform.exe", "version.json", "SHA256.txt")
+OFFICIAL_INSTALLER_NAME = "TongYangCustomsPlatform_Setup.exe"
+REQUIRED_ASSETS = (OFFICIAL_INSTALLER_NAME, "version.json", "SHA256.txt")
 REQUIRED_MANIFEST_FIELDS = (
     "version",
     "channel",
@@ -21,7 +22,7 @@ REQUIRED_MANIFEST_FIELDS = (
     "build_time",
     "sha256",
 )
-OFFICIAL_EXE_NAME = "TongYangCustomsPlatform.exe"
+OFFICIAL_EXE_NAME = OFFICIAL_INSTALLER_NAME
 
 
 @dataclass(frozen=True)
@@ -63,9 +64,9 @@ def main() -> None:
         raise SystemExit(f"release {args.tag} missing required asset(s): {', '.join(missing)}")
 
     manifest_url = assets["version.json"].get("browser_download_url", "")
-    exe_url = assets[OFFICIAL_EXE_NAME].get("browser_download_url", "")
+    exe_url = assets[OFFICIAL_INSTALLER_NAME].get("browser_download_url", "")
     sha_url = assets["SHA256.txt"].get("browser_download_url", "")
-    for label, url in (("version.json", manifest_url), (OFFICIAL_EXE_NAME, exe_url), ("SHA256.txt", sha_url)):
+    for label, url in (("version.json", manifest_url), (OFFICIAL_INSTALLER_NAME, exe_url), ("SHA256.txt", sha_url)):
         if not url:
             raise SystemExit(f"{label} missing browser_download_url")
         status = http_head_or_get(url).status
@@ -82,15 +83,15 @@ def main() -> None:
     sha_text = http_get(sha_url).body.decode("utf-8-sig").strip()
     if manifest["sha256"] not in sha_text:
         raise SystemExit("SHA256.txt does not contain manifest sha256")
-    if OFFICIAL_EXE_NAME not in sha_text:
-        raise SystemExit(f"SHA256.txt does not reference {OFFICIAL_EXE_NAME}")
+    if OFFICIAL_INSTALLER_NAME not in sha_text:
+        raise SystemExit(f"SHA256.txt does not reference {OFFICIAL_INSTALLER_NAME}")
 
     if args.require_latest:
         latest = github_json(f"https://api.github.com/repos/{args.repo}/releases/latest", args.token)
         if latest.get("tag_name") != args.tag:
             raise SystemExit(f"/releases/latest points to {latest.get('tag_name')} instead of {args.tag}")
         latest_manifest = f"https://github.com/{args.repo}/releases/latest/download/version.json"
-        latest_exe = f"https://github.com/{args.repo}/releases/latest/download/{OFFICIAL_EXE_NAME}"
+        latest_exe = f"https://github.com/{args.repo}/releases/latest/download/{OFFICIAL_INSTALLER_NAME}"
         latest_sha = f"https://github.com/{args.repo}/releases/latest/download/SHA256.txt"
         for label, url in (("latest version.json", latest_manifest), ("latest exe", latest_exe), ("latest SHA256.txt", latest_sha)):
             status = http_head_or_get(url).status
@@ -118,8 +119,14 @@ def validate_manifest_schema(manifest: dict, repo: str, tag: str, channel: str) 
         raise SystemExit(f"version.json channel mismatch: {manifest['channel']} != {channel}")
     if not re.fullmatch(r"[0-9a-f]{64}", str(manifest["sha256"]).strip().lower()):
         raise SystemExit("version.json sha256 must be a 64-character lowercase hex digest")
-    if not str(manifest["exe_url"]).endswith(f"/{OFFICIAL_EXE_NAME}"):
-        raise SystemExit(f"version.json exe_url must point to {OFFICIAL_EXE_NAME}")
+    if str(manifest.get("package_type", "")).strip() != "installer":
+        raise SystemExit("version.json package_type must be installer")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(manifest.get("app_sha256", "")).strip().lower()):
+        raise SystemExit("version.json app_sha256 must be a 64-character lowercase hex digest")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(manifest.get("package_sha256", "")).strip().lower()):
+        raise SystemExit("version.json package_sha256 must be a 64-character lowercase hex digest")
+    if not str(manifest["exe_url"]).endswith(f"/{OFFICIAL_INSTALLER_NAME}"):
+        raise SystemExit(f"version.json exe_url must point to {OFFICIAL_INSTALLER_NAME}")
     if str(manifest["exe_url"]) != expected_exe_url(repo, tag, channel):
         raise SystemExit(
             "version.json exe_url violates channel policy: "
@@ -129,8 +136,8 @@ def validate_manifest_schema(manifest: dict, repo: str, tag: str, channel: str) 
 
 def expected_exe_url(repo: str, tag: str, channel: str) -> str:
     if channel == "stable":
-        return f"https://github.com/{repo}/releases/latest/download/{OFFICIAL_EXE_NAME}"
-    return f"https://github.com/{repo}/releases/download/{tag}/{OFFICIAL_EXE_NAME}"
+        return f"https://github.com/{repo}/releases/latest/download/{OFFICIAL_INSTALLER_NAME}"
+    return f"https://github.com/{repo}/releases/download/{tag}/{OFFICIAL_INSTALLER_NAME}"
 
 
 def github_json(url: str, token: str) -> dict:

@@ -129,6 +129,7 @@ class AIAuditSummaryEngine:
             DocumentType.PACKING_LIST: "PL / PKG",
             DocumentType.BILL_OF_LADING: "B/L",
             DocumentType.ARRIVAL_NOTICE: "到貨通知",
+            DocumentType.DELIVERY_ORDER: "D/O",
             DocumentType.CLEARANCE_LIST: "清表",
             DocumentType.DATA_CLEARANCE: "資料清表",
             DocumentType.MATERIAL_CLEARANCE: "用料清表",

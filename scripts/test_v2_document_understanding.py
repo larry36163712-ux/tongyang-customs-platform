@@ -83,6 +83,16 @@ def main() -> None:
             "DELIVERY ORDER RELEASE",
         ]
     )
+    delivery_order_text = "\n".join(
+        [
+            "DELIVERY ORDER",
+            "D/O NO DO-5566",
+            "CONTAINER RELEASE",
+            "PICKUP LOCATION CY",
+            "CONTAINER TGHU1234567",
+            "SEAL NO ABC123",
+        ]
+    )
     noisy_bl_text = "\n".join(
         [
             "BILL 0F LAD1NG",
@@ -141,6 +151,9 @@ def main() -> None:
     arrival_notice = classifier.best(arrival_notice_text, "bl.pdf")
     if arrival_notice.document_type != DocumentType.ARRIVAL_NOTICE or arrival_notice.confidence < 0.75:
         raise RuntimeError(f"arrival notice fingerprint failed: {arrival_notice}")
+    delivery_order = classifier.best(delivery_order_text, "scan001.pdf")
+    if delivery_order.document_type != DocumentType.DELIVERY_ORDER or delivery_order.confidence < 0.65:
+        raise RuntimeError(f"D/O fingerprint failed: {delivery_order}")
     noisy_bl = classifier.best(noisy_bl_text, "scan001.pdf")
     if noisy_bl.document_type != DocumentType.BILL_OF_LADING:
         raise RuntimeError(f"OCR similarity matching failed for noisy B/L: {noisy_bl}")

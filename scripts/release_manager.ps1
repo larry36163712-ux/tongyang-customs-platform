@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 if (-not $env:GH_TOKEN) {
     throw "GH_TOKEN is required."
 }
-$OfficialExeName = "TongYangCustomsPlatform.exe"
+$OfficialExeName = "TongYangCustomsPlatform_Setup.exe"
 if ([string]::IsNullOrWhiteSpace($AssetName)) {
     $AssetName = $OfficialExeName
 }

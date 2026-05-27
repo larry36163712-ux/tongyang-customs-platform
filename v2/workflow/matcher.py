@@ -250,6 +250,7 @@ class WorkflowMatcher:
             return 0.30
         if document_type in {
             DocumentType.ARRIVAL_NOTICE,
+            DocumentType.DELIVERY_ORDER,
             DocumentType.TAX_SHEET,
             DocumentType.CLEARANCE_LIST,
             DocumentType.MATERIAL_CLEARANCE,
@@ -269,6 +270,7 @@ class WorkflowMatcher:
             DocumentType.EXPORT_DECLARATION,
             DocumentType.BOOKING,
             DocumentType.SHIPPING_ORDER,
+            DocumentType.DELIVERY_ORDER,
         }
         return left_type in useful and right_type in useful and left_type != right_type
 

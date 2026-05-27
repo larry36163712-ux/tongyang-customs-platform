@@ -49,6 +49,9 @@ class UpdateManifest:
     release_notes: str = ""
     minimum_supported_version: str = ""
     release_id: str = ""
+    package_type: str = "exe"
+    package_sha256: str = ""
+    app_sha256: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
@@ -57,6 +60,7 @@ class UpdateManifest:
             "exe_url": self.exe_url or self.download_url,
             "download_url": self.download_url,
             "sha256": self.sha256,
+            "app_sha256": self.app_sha256 or self.sha256,
             "build_id": self.build_id,
             "channel": self.channel,
             "release_notes": self.release_notes or self.notes,
@@ -64,6 +68,8 @@ class UpdateManifest:
             "build_time": self.build_time,
             "minimum_supported_version": self.minimum_supported_version,
             "release_id": self.release_id or self.build_id,
+            "package_type": self.package_type,
+            "package_sha256": self.package_sha256 or self.sha256,
         }
 
 
@@ -187,17 +193,20 @@ class V2Updater:
 
     def apply(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> UpdateCheck:
         try:
-            self._emit_progress(progress, "downloading", 0, "開始下載新版 EXE")
+            self._emit_progress(progress, "downloading", 0, "開始下載新版安裝包")
             self._log(f"progress download start version={manifest.version} url={manifest.download_url}")
             downloaded = self._download(manifest, progress=progress)
             self._log(f"progress download completed path={downloaded}")
             self._emit_progress(progress, "verifying", 90, "正在驗證 SHA256")
             self._log(f"progress verify completed sha256={manifest.sha256}")
             self._write_pending_manifest(manifest)
-            self._emit_progress(progress, "replacing", 96, "準備覆蓋主程式")
+            self._emit_progress(progress, "replacing", 96, "準備安裝新版")
             self._log("progress replace scheduled")
             self._emit_progress(progress, "restarting", 100, "即將重新啟動")
-            self._schedule_replace(downloaded)
+            if self._is_installer_package(manifest, downloaded):
+                self._schedule_installer(downloaded)
+            else:
+                self._schedule_replace(downloaded)
         except Exception as exc:
             self._log(f"apply failed: {exc}")
             return UpdateCheck("error", f"更新失敗，已保留目前版本：{exc}", manifest)
@@ -367,10 +376,13 @@ class V2Updater:
         manifest = _read_json_url(manifest_url)
         self._validate_manifest_contract(manifest)
 
+        raw_sha256 = str(manifest.get("sha256", "")).strip().lower()
+        app_sha256 = str(manifest.get("app_sha256") or raw_sha256).strip().lower()
+        package_sha256 = str(manifest.get("package_sha256") or raw_sha256).strip().lower()
         return UpdateManifest(
             version=str(manifest.get("version", "")).strip(),
             download_url=str(manifest.get("exe_url") or manifest.get("download_url") or "").strip(),
-            sha256=str(manifest.get("sha256", "")).strip().lower(),
+            sha256=app_sha256,
             channel=str(manifest.get("channel", self.settings.channel)).strip() or self.settings.channel,
             notes=str(manifest.get("notes") or manifest.get("release_notes") or ""),
             build_id=str(manifest.get("build_id", "")).strip(),
@@ -379,6 +391,9 @@ class V2Updater:
             release_notes=str(manifest.get("release_notes") or manifest.get("notes") or ""),
             minimum_supported_version=str(manifest.get("minimum_supported_version", "")),
             release_id=str(manifest.get("release_id") or manifest.get("build_id", "")).strip(),
+            package_type=str(manifest.get("package_type") or "exe").strip().lower(),
+            package_sha256=package_sha256,
+            app_sha256=app_sha256,
         )
 
     def _validate_manifest_contract(self, manifest: dict | list) -> None:
@@ -404,8 +419,8 @@ class V2Updater:
         if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
             raise RuntimeError("version.json invalid sha256")
         exe_url = str(manifest.get("exe_url", "")).strip()
-        if not exe_url.endswith("/TongYangCustomsPlatform.exe"):
-            raise RuntimeError("version.json exe_url must point to TongYangCustomsPlatform.exe")
+        if not (exe_url.endswith("/TongYangCustomsPlatform.exe") or exe_url.endswith("/TongYangCustomsPlatform_Setup.exe")):
+            raise RuntimeError("version.json exe_url must point to TongYangCustomsPlatform.exe or TongYangCustomsPlatform_Setup.exe")
         if channel == "stable" and "/releases/latest/download/" not in exe_url:
             raise RuntimeError("stable version.json exe_url must use /releases/latest/download/")
         if channel == "dev" and "/releases/download/" not in exe_url:
@@ -417,7 +432,8 @@ class V2Updater:
         if not manifest.sha256:
             raise RuntimeError("version.json 缺少 sha256")
 
-        target = Path(tempfile.gettempdir()) / "AI_Customs_ERP_V2.update.exe"
+        target_name = "TongYangCustomsPlatform_Setup.update.exe" if self._is_installer_manifest(manifest) else "AI_Customs_ERP_V2.update.exe"
+        target = Path(tempfile.gettempdir()) / target_name
         target.unlink(missing_ok=True)
         self._log(f"download start {manifest.download_url} -> {target}")
 
@@ -446,12 +462,19 @@ class V2Updater:
                     self._emit_progress(progress, "downloading", percent, message)
 
         digest = hashlib.sha256(target.read_bytes()).hexdigest().lower()
-        self._log(f"verify sha256 actual={digest} expected={manifest.sha256}")
-        if digest != manifest.sha256:
+        expected_sha = (manifest.package_sha256 or manifest.sha256).lower()
+        self._log(f"verify sha256 actual={digest} expected={expected_sha}")
+        if digest != expected_sha:
             target.unlink(missing_ok=True)
-            raise RuntimeError("新版 EXE SHA256 驗證失敗")
+            raise RuntimeError("新版安裝包 SHA256 驗證失敗")
         self._log("verify ok")
         return target
+
+    def _is_installer_manifest(self, manifest: UpdateManifest) -> bool:
+        return manifest.package_type == "installer" or manifest.download_url.endswith("/TongYangCustomsPlatform_Setup.exe")
+
+    def _is_installer_package(self, manifest: UpdateManifest, path: Path) -> bool:
+        return self._is_installer_manifest(manifest) or "setup" in path.name.casefold()
 
     def _schedule_replace(self, update_exe: Path) -> None:
         if not getattr(sys, "frozen", False):
@@ -474,6 +497,39 @@ class V2Updater:
         )
         script_path.write_text(script, encoding="utf-8")
         self._log(f"replace script scheduled={script_path}")
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+        subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=creationflags, close_fds=True)
+        os._exit(0)
+
+    def _schedule_installer(self, setup_exe: Path) -> None:
+        if not getattr(sys, "frozen", False):
+            raise RuntimeError("目前不是 EXE 執行狀態，略過自動安裝")
+
+        script_path = Path(tempfile.gettempdir()) / "TongYangCustomsPlatform_setup_update.bat"
+        script = f"""@echo off
+setlocal EnableExtensions
+set "SETUP={setup_exe}"
+set "LOG={self.log_path}"
+set "OLD_PID={os.getpid()}"
+echo [%date% %time%] setup update scheduled setup=%SETUP% >> "%LOG%"
+for /l %%i in (1,1,60) do (
+  tasklist /FI "PID eq %OLD_PID%" | findstr /R /C:" %OLD_PID% " > nul
+  if errorlevel 1 goto old_process_exited
+  ping 127.0.0.1 -n 2 > nul
+)
+taskkill /PID %OLD_PID% /F >> "%LOG%" 2>&1
+:old_process_exited
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath $env:SETUP -ArgumentList '--silent-update' -Verb RunAs -Wait" >> "%LOG%" 2>&1
+if errorlevel 1 (
+  echo [%date% %time%] setup update failed >> "%LOG%"
+  exit /b 1
+)
+del /f /q "%SETUP%" >> "%LOG%" 2>&1
+echo [%date% %time%] setup update completed >> "%LOG%"
+exit /b 0
+"""
+        script_path.write_text(script, encoding="utf-8")
+        self._log(f"installer update script scheduled={script_path}")
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
         subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=creationflags, close_fds=True)
         os._exit(0)

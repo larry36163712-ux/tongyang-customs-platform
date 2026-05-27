@@ -135,6 +135,17 @@ class SemanticDocumentClassifier:
             identifier_patterns=(r"\barrival\s+notice\b", r"\bnotice\s+of\s+arrival\b", r"\bfree\s+time\b", r"\bdelivery\s+order\b", r"到貨通知|抵港通知|到港日|費用明細"),
         ),
         DocumentSemanticProfile(
+            DocumentType.DELIVERY_ORDER,
+            layout_terms=("delivery order", "d/o", "提貨單", "小提單", "貨櫃交付"),
+            semantic_fields=("delivery order no", "d/o no", "pickup location", "container release", "貨櫃交付", "提貨地點", "領貨資訊", "倉儲資訊"),
+            customs_vocabulary=("放貨", "提貨", "貨櫃", "倉儲", "領貨"),
+            table_patterns=("container", "seal", "pickup", "release", "storage", "櫃號", "封條", "倉租"),
+            shipping_terms=("terminal", "cy", "cfs", "container yard", "port of discharge", "carrier"),
+            trade_fingerprint=("delivery order", "cargo release", "container release", "pickup order"),
+            identifier_patterns=(r"\b(?:delivery\s+order|d/o)\b", r"提貨單|小提單|貨櫃交付|領貨資訊"),
+            minimum_score=0.34,
+        ),
+        DocumentSemanticProfile(
             DocumentType.SHIPPING_ORDER,
             layout_terms=("shipping order", "s/o", "so no", "shipping instruction", "裝船通知", "訂艙單"),
             semantic_fields=("shipping order no", "s/o no", "booking no", "vessel", "voyage", "container", "cut off", "close date"),
@@ -271,8 +282,9 @@ class SemanticDocumentClassifier:
             return 0.12
         if evidence_count >= 2 and structure.numeric_ratio >= 0.10:
             return 0.10
-        if any(term in structure.normalized for term in ("稅則", "統計方式", "完稅價格", "報單")):
-            return 0.08
+        core_terms = ("稅則", "統計方式", "完稅價格", "報單", "進口報單", "海關進口報單", "CIF", "FOB", "稅率", "稅額", "推貿費")
+        if any(self._normalize(term) in structure.normalized for term in core_terms):
+            return 0.18
         return 0.0
 
     def _filename_hints(self, document_type: DocumentType, filename: str) -> float:
@@ -284,6 +296,7 @@ class SemanticDocumentClassifier:
             DocumentType.INVOICE: ("invoice", "inv", "iv", "發票"),
             DocumentType.PACKING_LIST: ("packing", "pack", "pl", "pkg", "裝箱", "包裝"),
             DocumentType.ARRIVAL_NOTICE: ("arrival", "notice", "到貨", "抵港"),
+            DocumentType.DELIVERY_ORDER: ("d/o", "delivery", "提貨", "小提單"),
             DocumentType.BILL_OF_LADING: ("b/l", "bl", "提單"),
             DocumentType.SHIPPING_ORDER: ("so", "s/o", "shipping order"),
             DocumentType.BOOKING: ("booking", "訂艙"),
@@ -303,7 +316,7 @@ class SemanticDocumentClassifier:
             score += min(0.08, 0.025 * structure.money_count)
         if document_type == DocumentType.PACKING_LIST and structure.weight_count:
             score += min(0.10, 0.03 * structure.weight_count)
-        if document_type in {DocumentType.BILL_OF_LADING, DocumentType.BOOKING, DocumentType.SHIPPING_ORDER, DocumentType.ARRIVAL_NOTICE} and structure.container_count:
+        if document_type in {DocumentType.BILL_OF_LADING, DocumentType.BOOKING, DocumentType.SHIPPING_ORDER, DocumentType.ARRIVAL_NOTICE, DocumentType.DELIVERY_ORDER} and structure.container_count:
             score += 0.06
         if document_type in {DocumentType.DS2_DECLARATION, DocumentType.EXPORT_DECLARATION, DocumentType.TAX_SHEET} and structure.numeric_ratio >= 0.12:
             score += 0.08

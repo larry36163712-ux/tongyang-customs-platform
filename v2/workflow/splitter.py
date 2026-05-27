@@ -83,6 +83,8 @@ class SmartDocumentSplitter:
             return "偵測到報單語意欄位，但 OCR 或欄位解析不完整，需人工確認是否為正式 DS2 報單。"
         if candidate.document_type == DocumentType.ARRIVAL_NOTICE:
             return "偵測到到貨通知特徵，但船公司或費用欄位不完整，需人工確認。"
+        if candidate.document_type == DocumentType.DELIVERY_ORDER:
+            return "偵測到 D/O 或提貨資訊，但放貨與領貨欄位不完整，需人工確認。"
         if candidate.document_type == DocumentType.UNKNOWN:
             return "AI 無法完全辨識此文件，請人工確認文件用途。"
         return "AI 辨識信心不足，需人工確認文件類型。"

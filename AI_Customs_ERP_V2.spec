@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 ROOT = Path.cwd()
+VERSION_FILE = ROOT / "version_info.txt"
 datas = []
 for source, target in (
     ("config", "config"),
@@ -93,4 +94,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=str(VERSION_FILE) if VERSION_FILE.exists() else None,
 )

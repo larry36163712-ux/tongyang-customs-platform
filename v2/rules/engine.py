@@ -318,6 +318,7 @@ class RuleEngine:
             DocumentType.PACKING_LIST: "PKG",
             DocumentType.BILL_OF_LADING: "B/L",
             DocumentType.ARRIVAL_NOTICE: "Arrival Notice",
+            DocumentType.DELIVERY_ORDER: "D/O",
             DocumentType.CLEARANCE_LIST: "Clearance List",
             DocumentType.BOOKING: "BOOKING",
             DocumentType.SHIPPING_ORDER: "S/O",
