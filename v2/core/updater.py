@@ -29,6 +29,7 @@ from v2.core.deployment import (
     cleanup_update_artifacts,
     ensure_shortcuts,
     inspect_shortcuts,
+    is_program_files_path,
     production_exe_path,
     production_root,
 )
@@ -193,6 +194,13 @@ class V2Updater:
 
     def apply(self, manifest: UpdateManifest, progress: ProgressCallback | None = None) -> UpdateCheck:
         try:
+            if self._requires_installer_update() and not self._is_installer_manifest(manifest):
+                message = (
+                    "Program Files installation requires installer-based update. "
+                    "Refusing direct EXE replacement to avoid WinError 5."
+                )
+                self._log(message)
+                return UpdateCheck("error", message, manifest)
             self._emit_progress(progress, "downloading", 0, "開始下載新版安裝包")
             self._log(f"progress download start version={manifest.version} url={manifest.download_url}")
             downloaded = self._download(manifest, progress=progress)
@@ -490,11 +498,29 @@ class V2Updater:
     def _is_installer_package(self, manifest: UpdateManifest, path: Path) -> bool:
         return self._is_installer_manifest(manifest) or "setup" in path.name.casefold()
 
+    def _requires_installer_update(self) -> bool:
+        if not getattr(sys, "frozen", False):
+            return False
+        try:
+            current_exe = Path(sys.executable).resolve()
+        except OSError:
+            current_exe = Path(sys.executable).absolute()
+        return is_program_files_path(current_exe) or is_program_files_path(production_exe_path())
+
     def _schedule_replace(self, update_exe: Path) -> None:
         if not getattr(sys, "frozen", False):
             raise RuntimeError("目前不是 EXE 執行狀態，略過自動覆蓋")
 
         current_exe = Path(sys.executable).resolve()
+        if self._requires_installer_update():
+            self._log(
+                "direct replace blocked for Program Files installation "
+                f"current_exe={current_exe} update_exe={update_exe}"
+            )
+            raise RuntimeError(
+                "Program Files installation requires installer-based update. "
+                "Direct EXE replacement is blocked."
+            )
         backup_exe = current_exe.with_suffix(".rollback.exe")
         script_path = Path(tempfile.gettempdir()) / "AI_Customs_ERP_V2_update.bat"
         script = build_replace_script(

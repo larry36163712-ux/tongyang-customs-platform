@@ -52,8 +52,12 @@ def check_for_updates(current_version: str, update_config: dict, apply_update: b
         return UpdateResult("error", "發現新版，但 version.json 缺少 download_url。", latest)
 
     try:
-        downloaded = _download_update(download_url, manifest.get("sha256", ""))
-        _schedule_replace(downloaded)
+        expected_sha = str(manifest.get("package_sha256") or manifest.get("sha256", "")).strip()
+        downloaded = _download_update(download_url, expected_sha)
+        if _is_installer_manifest(manifest, download_url):
+            _schedule_installer(downloaded)
+        else:
+            _schedule_replace(downloaded)
     except Exception as exc:
         return UpdateResult("error", f"更新失敗，保留目前版本：{exc}", latest)
 
@@ -75,7 +79,12 @@ def _load_manifest(version_url: str) -> dict:
 
 
 def _download_update(download_url: str, expected_sha256: str = "") -> Path:
-    target = Path(tempfile.gettempdir()) / "TongYangCustoms.update.exe"
+    target_name = (
+        "TongYangCustoms_Setup.update.exe"
+        if download_url.endswith("TongYangCustomsPlatform_Setup.exe")
+        else "TongYangCustoms.update.exe"
+    )
+    target = Path(tempfile.gettempdir()) / target_name
     target.unlink(missing_ok=True)
 
     if download_url.startswith(("http://", "https://")):
@@ -93,6 +102,28 @@ def _download_update(download_url: str, expected_sha256: str = "") -> Path:
             target.unlink(missing_ok=True)
             raise RuntimeError("新版 EXE SHA256 驗證失敗")
     return target
+
+
+def _is_installer_manifest(manifest: dict, download_url: str) -> bool:
+    package_type = str(manifest.get("package_type") or "").strip().lower()
+    return package_type == "installer" or download_url.endswith("TongYangCustomsPlatform_Setup.exe")
+
+
+def _is_program_files_path(path: Path) -> bool:
+    roots = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path.absolute()
+    for root in roots:
+        if not root:
+            continue
+        try:
+            resolved.relative_to(Path(root).resolve())
+            return True
+        except (OSError, ValueError):
+            continue
+    return False
 
 
 def _open_url(url: str, timeout: int):
@@ -118,6 +149,10 @@ def _schedule_replace(update_exe: Path) -> None:
         raise RuntimeError("目前不是 EXE 執行狀態，略過自動覆蓋")
 
     current_exe = Path(sys.executable).resolve()
+    if _is_program_files_path(current_exe):
+        raise RuntimeError(
+            "Program Files installation requires installer-based update; direct EXE replacement is blocked."
+        )
     backup_exe = current_exe.with_suffix(".old.exe")
     script_path = Path(tempfile.gettempdir()) / "TongYangCustoms_update.bat"
     script = f"""@echo off
@@ -137,6 +172,33 @@ if errorlevel 1 (
 del /f /q "%UPDATE%"
 del /f /q "%BACKUP%"
 start "" "%CURRENT%"
+exit /b 0
+"""
+    script_path.write_text(script, encoding="utf-8")
+    subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=subprocess.CREATE_NO_WINDOW)
+    os._exit(0)
+
+
+def _schedule_installer(setup_exe: Path) -> None:
+    if not getattr(sys, "frozen", False):
+        raise RuntimeError("目前不是 EXE 執行狀態，略過安裝更新")
+
+    script_path = Path(tempfile.gettempdir()) / "TongYangCustoms_setup_update.bat"
+    script = f"""@echo off
+setlocal EnableExtensions
+set "SETUP={setup_exe}"
+set "OLD_PID={os.getpid()}"
+ping 127.0.0.1 -n 2 > nul
+for /l %%i in (1,1,60) do (
+  tasklist /FI "PID eq %OLD_PID%" | findstr /R /C:" %OLD_PID% " > nul
+  if errorlevel 1 goto old_process_exited
+  ping 127.0.0.1 -n 2 > nul
+)
+taskkill /PID %OLD_PID% /F > nul 2>&1
+:old_process_exited
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath $env:SETUP -ArgumentList '--silent-update' -Verb RunAs -Wait"
+if errorlevel 1 exit /b 1
+del /f /q "%SETUP%" > nul 2>&1
 exit /b 0
 """
     script_path.write_text(script, encoding="utf-8")

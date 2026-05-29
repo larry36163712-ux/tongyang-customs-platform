@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import ctypes
 from pathlib import Path
 
 APP_DIR_NAME = "TongYangCustomsPlatform"
@@ -42,6 +43,35 @@ def production_root() -> Path:
 
 def production_exe_path() -> Path:
     return production_root() / APP_EXE_NAME
+
+
+def is_program_files_path(path: Path) -> bool:
+    program_files_roots = [
+        os.environ.get("ProgramFiles"),
+        os.environ.get("ProgramFiles(x86)"),
+    ]
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path.absolute()
+    for root in program_files_roots:
+        if not root:
+            continue
+        try:
+            resolved.relative_to(Path(root).resolve())
+            return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def is_elevated_process() -> bool:
+    if os.name != "nt":
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def is_frozen_app() -> bool:
@@ -90,6 +120,23 @@ def ensure_runtime_layout(relaunch: bool = True) -> dict[str, object]:
     current = Path(sys.executable).resolve()
     target = production_exe_path()
     if current != target:
+        if is_program_files_path(target) and not is_elevated_process():
+            state["installed"] = target.exists()
+            state["install_required"] = True
+            state["layout_error"] = (
+                "Program Files requires elevated installer; skipped direct self-copy "
+                "to avoid partial update or WinError 5."
+            )
+            state["cleanup_removed"] = cleanup_update_artifacts(root)
+            if target.exists():
+                shortcut_state = ensure_shortcuts(target)
+                state["shortcut_target"] = str(target)
+                state["shortcuts"] = shortcut_state
+                if relaunch:
+                    _launch_hidden(target)
+                    state["relaunching"] = True
+                    return state
+            return state
         try:
             _copy_if_changed(current, target)
             _copy_runtime_manifest(current.parent, root)
@@ -315,6 +362,10 @@ def _copy_if_changed(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and _sha256(source) == _sha256(target):
         return
+    if is_program_files_path(target) and not is_elevated_process():
+        raise PermissionError(
+            "Program Files requires elevated installer; direct EXE replace is not allowed."
+        )
     temp_target = target.with_suffix(".new.exe")
     shutil.copy2(source, temp_target)
     try:
