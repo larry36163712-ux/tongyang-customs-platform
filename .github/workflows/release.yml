@@ -213,12 +213,12 @@ jobs:
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
           function Convert-HttpContentToText($Content) {
-            if ($Content -is [byte[]]) { return [Text.Encoding]::UTF8.GetString($Content) }
+            if ($Content -is [byte[]]) { return ([Text.Encoding]::UTF8.GetString($Content)).TrimStart([char]0xfeff) }
             if ($Content -is [array]) {
               $bytes = [byte[]]@($Content | ForEach-Object { [byte]$_ })
-              return [Text.Encoding]::UTF8.GetString($bytes)
+              return ([Text.Encoding]::UTF8.GetString($bytes)).TrimStart([char]0xfeff)
             }
-            return [string]$Content
+            return ([string]$Content).TrimStart([char]0xfeff)
           }
           if ($channel -eq "stable") {
             $manifestUrl = "https://github.com/$repo/releases/latest/download/version.json"

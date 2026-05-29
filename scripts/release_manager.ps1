@@ -61,13 +61,13 @@ function Get-ReleaseByTag {
 function Convert-HttpContentToText {
     param($Content)
     if ($Content -is [byte[]]) {
-        return [Text.Encoding]::UTF8.GetString($Content)
+        return ([Text.Encoding]::UTF8.GetString($Content)).TrimStart([char]0xfeff)
     }
     if ($Content -is [array]) {
         $bytes = [byte[]]@($Content | ForEach-Object { [byte]$_ })
-        return [Text.Encoding]::UTF8.GetString($bytes)
+        return ([Text.Encoding]::UTF8.GetString($bytes)).TrimStart([char]0xfeff)
     }
-    return [string]$Content
+    return ([string]$Content).TrimStart([char]0xfeff)
 }
 
 function Remove-OldDevReleases {
