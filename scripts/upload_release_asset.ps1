@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 if (-not $env:GH_TOKEN) {
     throw "GH_TOKEN is required."
 }
-$RequiredExecutableName = "TongYangCustomsPlatform.exe"
+$RequiredExecutableName = "TongYangCustomsPlatform_Setup.exe"
 
 if (-not (Test-Path -LiteralPath $Path)) {
     throw "Asset file not found: $Path"

@@ -13,6 +13,22 @@ from pathlib import Path
 APP_DIR_NAME = "TongYangCustomsPlatform"
 APP_DISPLAY_NAME = "通洋報關平台"
 APP_EXE_NAME = "TongYangCustomsPlatform.exe"
+SETUP_EXE_NAME = "TongYangCustomsPlatform_Setup.exe"
+LEGACY_CHINESE_EXE_NAME = "通洋報關平台.exe"
+DESKTOP_ARTIFACT_NAMES = (
+    APP_EXE_NAME,
+    SETUP_EXE_NAME,
+    LEGACY_CHINESE_EXE_NAME,
+    "AI_Customs_ERP_V2.update.exe",
+    "TongYangCustomsPlatform.update.exe",
+    "TongYangCustomsPlatform_Setup.update.exe",
+    "SHA256.txt",
+)
+UPDATE_SCRIPT_NAMES = (
+    "AI_Customs_ERP_V2_update.bat",
+    "TongYangCustomsPlatform_setup_update.bat",
+    "update.bat",
+)
 
 
 def _base_dir() -> Path:
@@ -55,6 +71,7 @@ def _copy_payload(root: Path) -> dict[str, str]:
     (root / "logs").mkdir(exist_ok=True)
     (root / "cache").mkdir(exist_ok=True)
     (root / "config").mkdir(exist_ok=True)
+    (root / "runtime").mkdir(exist_ok=True)
 
     app_exe = _payload_path(APP_EXE_NAME)
     target_exe = root / APP_EXE_NAME
@@ -104,7 +121,8 @@ foreach ($dir in @($desktop, $startMenu)) {
       $sc = $shell.CreateShortcut($lnk.FullName)
       $target = [string]$sc.TargetPath
       $targetName = if ($target) { [IO.Path]::GetFileName($target) } else { "" }
-      $related = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關"
+      $isCanonical = ($lnk.FullName -eq (Join-Path $desktop ($name + ".lnk"))) -or ($lnk.FullName -eq (Join-Path $startMenu ($name + ".lnk")))
+      $related = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關|报关"
       if ($related -and $target -ne $exe) {
         $previous = $target
         $sc.TargetPath = $exe
@@ -112,6 +130,9 @@ foreach ($dir in @($desktop, $startMenu)) {
         $sc.IconLocation = $exe
         $sc.Save()
         $rows += [pscustomobject]@{ shortcut_path=$lnk.FullName; target_path=$exe; previous_target_path=$previous; action="repaired_old_shortcut" }
+      } elseif ($related -and -not $isCanonical) {
+        Remove-Item -LiteralPath $lnk.FullName -Force -ErrorAction SilentlyContinue
+        $rows += [pscustomobject]@{ shortcut_path=$lnk.FullName; target_path=$target; previous_target_path=$target; action="removed_duplicate_shortcut" }
       }
     } catch {}
   }
@@ -134,6 +155,41 @@ $rows | ConvertTo-Json -Depth 4 -Compress
         return []
     parsed = json.loads(output)
     return parsed if isinstance(parsed, list) else [parsed]
+
+
+def _cleanup_desktop_artifacts(installed_exe: Path) -> list[str]:
+    removed: list[str] = []
+    desktop_dirs = []
+    user_profile = os.environ.get("USERPROFILE")
+    public = os.environ.get("PUBLIC")
+    if user_profile:
+        desktop_dirs.append(Path(user_profile) / "Desktop")
+    if public:
+        desktop_dirs.append(Path(public) / "Desktop")
+
+    for directory in desktop_dirs:
+        if not directory.exists():
+            continue
+        for name in DESKTOP_ARTIFACT_NAMES:
+            path = directory / name
+            try:
+                if not path.exists() or not path.is_file():
+                    continue
+                if path.resolve() == installed_exe.resolve():
+                    continue
+                path.unlink()
+                removed.append(str(path))
+            except OSError:
+                continue
+        for name in UPDATE_SCRIPT_NAMES:
+            path = directory / name
+            try:
+                if path.exists() and path.is_file():
+                    path.unlink()
+                    removed.append(str(path))
+            except OSError:
+                continue
+    return removed
 
 
 def _launch_app(exe: Path) -> None:
@@ -159,11 +215,13 @@ def main() -> int:
     root = _program_files_root()
     install_state = _copy_payload(root)
     shortcuts = _ensure_shortcuts(Path(install_state["exe"]))
+    desktop_cleanup = _cleanup_desktop_artifacts(Path(install_state["exe"]))
     state = {
         "status": "installed",
         "root": str(root),
         "exe": install_state["exe"],
         "shortcuts": shortcuts,
+        "desktop_cleanup": desktop_cleanup,
         "silent": silent,
     }
     _write_install_log(root, state)

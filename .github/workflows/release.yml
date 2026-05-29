@@ -94,9 +94,16 @@ jobs:
           python scripts\test_v2_declaration_workflow.py
           python scripts\test_v2_updater_version_source.py
 
-      - name: Build EXE
+      - name: Build release package
         shell: pwsh
-        run: .\build_v2_exe.ps1
+        run: |
+          .\scripts\build_release_package.ps1 `
+            -Repo "${{ github.repository }}" `
+            -Tag "${{ steps.vars.outputs.tag }}" `
+            -Version "${{ steps.vars.outputs.version }}" `
+            -Channel "${{ steps.vars.outputs.channel }}" `
+            -ReleaseNotes "${{ steps.vars.outputs.channel }} release ${{ steps.vars.outputs.tag }}" `
+            -MinimumSupportedVersion "${{ steps.vars.outputs.version }}"
 
       - name: Generate release assets
         shell: pwsh
@@ -105,48 +112,18 @@ jobs:
           $version = "${{ steps.vars.outputs.version }}"
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
-          $assetName = "TongYangCustomsPlatform.exe"
+          $assetName = "TongYangCustomsPlatform_Setup.exe"
           $exePath = Join-Path "dist" $assetName
 
           if (-not (Test-Path -LiteralPath $exePath)) {
-            throw "Expected EXE not found: $exePath"
+            throw "Expected setup EXE not found: $exePath"
           }
-
-          python scripts/make_release_manifest.py `
-            --repo $repo `
-            --tag $tag `
-            --version $version `
-            --exe $exePath `
-            --asset-name $assetName `
-            --channel $channel `
-            --release-notes "$($channel.ToUpper()) release $tag" `
-            --minimum-supported-version $version `
-            --output "dist\version.json"
-
-          $manifest = Get-Content "dist\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($channel -eq "dev") {
-            $tagExeUrl = "https://github.com/$repo/releases/download/$tag/$assetName"
-            $manifest.exe_url = $tagExeUrl
-            $manifest.download_url = $tagExeUrl
-          } else {
-            $latestExeUrl = "https://github.com/$repo/releases/latest/download/$assetName"
-            $manifest.exe_url = $latestExeUrl
-            $manifest.download_url = $latestExeUrl
-          }
-          $manifest | ConvertTo-Json -Depth 30 | Set-Content "dist\version.json" -Encoding UTF8
           python scripts\release_contract.py `
             --mode manifest `
             --repo $repo `
             --tag $tag `
             --channel $channel `
             --manifest "dist\version.json"
-
-          New-Item -ItemType Directory -Force -Path "dist\config" | Out-Null
-          Copy-Item -LiteralPath "dist\version.json" -Destination "dist\config\version.json" -Force
-          Copy-Item -LiteralPath "dist\version.json" -Destination "config\version.json" -Force
-          if ($channel -eq "dev") {
-            Copy-Item -LiteralPath "dist\version.json" -Destination "config\dev_version.json" -Force
-          }
 
           if (Test-Path "config\v2_settings.json") {
             $settings = Get-Content "config\v2_settings.json" -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -155,9 +132,6 @@ jobs:
             $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
             $settings | ConvertTo-Json -Depth 30 | Set-Content "config\v2_settings.json" -Encoding UTF8
           }
-
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
-          [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $assetName`n", [Text.UTF8Encoding]::new($false))
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -200,7 +174,7 @@ jobs:
           - Channel: $channel
           - Build time: $buildTime
           - Git commit: $commit
-          - Assets: TongYangCustomsPlatform.exe, version.json, SHA256.txt
+          - Assets: TongYangCustomsPlatform_Setup.exe, version.json, SHA256.txt
           - Release lifecycle: build, manifest generation, SHA256 generation, upload, verify, cleanup
           "@ | Set-Content "dist\release-notes.md" -Encoding UTF8
 
@@ -212,7 +186,7 @@ jobs:
           $repo = "${{ github.repository }}"
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
-          $assetName = "TongYangCustomsPlatform.exe"
+          $assetName = "TongYangCustomsPlatform_Setup.exe"
           $exePath = Join-Path "dist" $assetName
 
           git config user.name "github-actions[bot]"
@@ -240,11 +214,11 @@ jobs:
           $channel = "${{ steps.vars.outputs.channel }}"
           if ($channel -eq "stable") {
             $manifestUrl = "https://github.com/$repo/releases/latest/download/version.json"
-            $exeUrl = "https://github.com/$repo/releases/latest/download/TongYangCustomsPlatform.exe"
+            $exeUrl = "https://github.com/$repo/releases/latest/download/TongYangCustomsPlatform_Setup.exe"
             $shaUrl = "https://github.com/$repo/releases/latest/download/SHA256.txt"
           } else {
             $manifestUrl = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
-            $exeUrl = "https://github.com/$repo/releases/download/$tag/TongYangCustomsPlatform.exe"
+            $exeUrl = "https://github.com/$repo/releases/download/$tag/TongYangCustomsPlatform_Setup.exe"
             $shaUrl = "https://github.com/$repo/releases/download/$tag/SHA256.txt"
           }
 
@@ -263,8 +237,8 @@ jobs:
           }
           $shaResponse = Invoke-WebRequest -Method Get -Uri $shaUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"} -UseBasicParsing
           if ($shaResponse.StatusCode -ne 200) { throw "SHA256.txt HTTP status was $($shaResponse.StatusCode)" }
-          if ($shaResponse.Content -notmatch [regex]::Escape($manifest.sha256)) { throw "SHA256.txt does not contain manifest sha256" }
-          if ($shaResponse.Content -notmatch "TongYangCustomsPlatform\.exe") { throw "SHA256.txt does not reference TongYangCustomsPlatform.exe" }
+          if ($shaResponse.Content -notmatch [regex]::Escape($manifest.package_sha256)) { throw "SHA256.txt does not contain installer package_sha256" }
+          if ($shaResponse.Content -notmatch "TongYangCustomsPlatform_Setup\.exe") { throw "SHA256.txt does not reference TongYangCustomsPlatform_Setup.exe" }
 
           $contractArgs = @(
             "scripts\release_contract.py",

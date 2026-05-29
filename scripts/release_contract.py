@@ -81,8 +81,8 @@ def main() -> None:
         raise SystemExit(f"manifest exe_url is invalid: {manifest['exe_url']}")
 
     sha_text = http_get(sha_url).body.decode("utf-8-sig").strip()
-    if manifest["sha256"] not in sha_text:
-        raise SystemExit("SHA256.txt does not contain manifest sha256")
+    if manifest["package_sha256"] not in sha_text:
+        raise SystemExit("SHA256.txt does not contain installer package_sha256")
     if OFFICIAL_INSTALLER_NAME not in sha_text:
         raise SystemExit(f"SHA256.txt does not reference {OFFICIAL_INSTALLER_NAME}")
 
@@ -104,7 +104,8 @@ def main() -> None:
         "assets": list(REQUIRED_ASSETS),
         "manifest_url": manifest_url,
         "exe_url": manifest["exe_url"],
-        "sha256": manifest["sha256"],
+        "app_sha256": manifest["app_sha256"],
+        "package_sha256": manifest["package_sha256"],
         "contract": "ok",
     }, ensure_ascii=False, indent=2))
 
@@ -119,6 +120,8 @@ def validate_manifest_schema(manifest: dict, repo: str, tag: str, channel: str) 
         raise SystemExit(f"version.json channel mismatch: {manifest['channel']} != {channel}")
     if not re.fullmatch(r"[0-9a-f]{64}", str(manifest["sha256"]).strip().lower()):
         raise SystemExit("version.json sha256 must be a 64-character lowercase hex digest")
+    if str(manifest["sha256"]).strip().lower() != str(manifest.get("app_sha256", "")).strip().lower():
+        raise SystemExit("version.json sha256 must equal app_sha256 for SHA-first app comparison")
     if str(manifest.get("package_type", "")).strip() != "installer":
         raise SystemExit("version.json package_type must be installer")
     if not re.fullmatch(r"[0-9a-f]{64}", str(manifest.get("app_sha256", "")).strip().lower()):

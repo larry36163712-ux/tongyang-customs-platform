@@ -191,6 +191,9 @@ function Assert-ReleaseAssets {
     if (-not $manifest.sha256) { throw "version.json missing sha256." }
     if ($manifest.channel -ne $Channel) { throw "version.json channel mismatch. manifest=$($manifest.channel) expected=$Channel" }
     if ($manifest.sha256 -notmatch '^[0-9a-f]{64}$') { throw "version.json sha256 is invalid: $($manifest.sha256)" }
+    if ($manifest.package_type -ne "installer") { throw "version.json package_type must be installer." }
+    if ($manifest.app_sha256 -notmatch '^[0-9a-f]{64}$') { throw "version.json app_sha256 is invalid: $($manifest.app_sha256)" }
+    if ($manifest.package_sha256 -notmatch '^[0-9a-f]{64}$') { throw "version.json package_sha256 is invalid: $($manifest.package_sha256)" }
 
     Invoke-WebRequest -Method Head -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
     Invoke-WebRequest -Method Head -Uri $exeAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
@@ -202,8 +205,8 @@ function Assert-ReleaseAssets {
     } else {
         [string]$shaResponse.Content
     }
-    if ($shaText -notlike "*$($manifest.sha256)*") {
-        throw "SHA256.txt does not contain manifest sha256. manifest=$($manifest.sha256) sha_text=$shaText"
+    if ($shaText -notlike "*$($manifest.package_sha256)*") {
+        throw "SHA256.txt does not contain installer package_sha256. package_sha256=$($manifest.package_sha256) sha_text=$shaText"
     }
     if ($shaText -notlike "*$OfficialExeName*") {
         throw "SHA256.txt does not reference $OfficialExeName. sha_text=$shaText"
@@ -238,13 +241,25 @@ function Assert-LocalReleaseFiles {
     if ($manifest.sha256 -notmatch '^[0-9a-f]{64}$') {
         throw "Release preflight failed. version.json sha256 is invalid."
     }
+    if ($manifest.package_type -ne "installer") {
+        throw "Release preflight failed. version.json package_type must be installer."
+    }
+    if ($manifest.app_sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "Release preflight failed. version.json app_sha256 is invalid."
+    }
+    if ($manifest.sha256 -ne $manifest.app_sha256) {
+        throw "Release preflight failed. version.json sha256 must equal app_sha256 for SHA-first app comparison."
+    }
+    if ($manifest.package_sha256 -notmatch '^[0-9a-f]{64}$') {
+        throw "Release preflight failed. version.json package_sha256 is invalid."
+    }
     $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $ExePath).Hash.ToLower()
-    if ($actualHash -ne $manifest.sha256) {
-        throw "Release preflight failed. EXE SHA256 mismatch. actual=$actualHash manifest=$($manifest.sha256)"
+    if ($actualHash -ne $manifest.package_sha256) {
+        throw "Release preflight failed. Installer package SHA256 mismatch. actual=$actualHash manifest=$($manifest.package_sha256)"
     }
     $shaText = Get-Content -LiteralPath $ShaPath -Raw -Encoding UTF8
-    if ($shaText -notmatch [regex]::Escape($manifest.sha256)) {
-        throw "Release preflight failed. SHA256.txt does not contain manifest sha256."
+    if ($shaText -notmatch [regex]::Escape($manifest.package_sha256)) {
+        throw "Release preflight failed. SHA256.txt does not contain installer package_sha256."
     }
     if ($shaText -notmatch [regex]::Escape($OfficialExeName)) {
         throw "Release preflight failed. SHA256.txt does not reference $OfficialExeName."

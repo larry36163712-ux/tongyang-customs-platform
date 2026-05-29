@@ -50,9 +50,18 @@ jobs:
           python scripts\test_v2_declaration_workflow.py
           python scripts\test_v2_updater_version_source.py
 
-      - name: Build EXE
+      - name: Build release package
         shell: pwsh
-        run: .\build_v2_exe.ps1
+        run: |
+          $version = "${{ inputs.version || '1.1.2-dev' }}"
+          $channel = "${{ inputs.channel || 'dev' }}"
+          .\scripts\build_release_package.ps1 `
+            -Repo "${{ github.repository }}" `
+            -Tag "v$version" `
+            -Version $version `
+            -Channel $channel `
+            -ReleaseNotes "$channel build v$version" `
+            -MinimumSupportedVersion $version
 
       - name: Generate build manifest
         shell: pwsh
@@ -61,26 +70,8 @@ jobs:
           $version = "${{ inputs.version || '1.1.2-dev' }}"
           $channel = "${{ inputs.channel || 'dev' }}"
           $tag = "v$version"
-          $assetName = "TongYangCustomsPlatform.exe"
+          $assetName = "TongYangCustomsPlatform_Setup.exe"
           $exePath = Join-Path "dist" $assetName
-
-          python scripts/make_release_manifest.py `
-            --repo $repo `
-            --tag $tag `
-            --version $version `
-            --exe $exePath `
-            --asset-name $assetName `
-            --channel $channel `
-            --release-notes "$($channel.ToUpper()) build $tag" `
-            --minimum-supported-version $version `
-            --output "dist\version.json"
-
-          if ($channel -eq "dev") {
-            $manifest = Get-Content "dist\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-            $manifest.exe_url = "https://github.com/$repo/releases/download/$tag/$assetName"
-            $manifest.download_url = $manifest.exe_url
-            $manifest | ConvertTo-Json -Depth 30 | Set-Content "dist\version.json" -Encoding UTF8
-          }
           python scripts\release_contract.py `
             --mode manifest `
             --repo $repo `
@@ -88,9 +79,6 @@ jobs:
             --channel $channel `
             --manifest "dist\version.json"
 
-          Copy-Item -LiteralPath "dist\version.json" -Destination "dist\config\version.json" -Force
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
-          [IO.File]::WriteAllText("dist\SHA256.txt", "$hash  $assetName`n", [Text.UTF8Encoding]::new($false))
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

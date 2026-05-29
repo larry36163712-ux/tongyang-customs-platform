@@ -100,8 +100,8 @@ if ($Version -notmatch "^\d+\.\d+\.\d+-dev$") {
 }
 
 $tag = "v$Version"
-$localExeName = "TongYangCustomsPlatform.exe"
-$assetName = "TongYangCustomsPlatform.exe"
+$localExeName = "TongYangCustomsPlatform_Setup.exe"
+$assetName = "TongYangCustomsPlatform_Setup.exe"
 $exePath = Join-Path $root "dist\$localExeName"
 $distVersionPath = Join-Path $root "dist\config\version.json"
 $distReleaseManifestPath = Join-Path $root "dist\version.json"
@@ -184,37 +184,26 @@ Invoke-Step "Run tests" {
     python scripts\test_v2_updater_workflow.py
 }
 
-Invoke-Step "Build EXE" {
-    powershell -ExecutionPolicy Bypass -File .\build_v2_exe.ps1
+Invoke-Step "Build release package" {
+    powershell -ExecutionPolicy Bypass -File .\scripts\build_release_package.ps1 `
+        -Repo $Repo `
+        -Tag $tag `
+        -Version $Version `
+        -Channel dev `
+        -ReleaseNotes "DEV release $tag" `
+        -MinimumSupportedVersion $Version
 }
 
-Invoke-Step "Generate assets and manifests" {
+Invoke-Step "Verify assets and manifests" {
     if (-not (Test-Path -LiteralPath $exePath)) {
-        throw "Build did not produce expected EXE: $exePath"
+        throw "Build did not produce expected installer: $exePath"
     }
-
-    python scripts\make_release_manifest.py `
+    python scripts\release_contract.py `
+        --mode manifest `
         --repo $Repo `
         --tag $tag `
-        --version $Version `
-        --exe $exePath `
-        --asset-name $assetName `
         --channel dev `
-        --release-notes "DEV release $tag" `
-        --minimum-supported-version $Version `
-        --output $distReleaseManifestPath
-
-    $releaseManifest = Read-JsonFile $distReleaseManifestPath
-    $releaseManifest.exe_url = "https://github.com/$Repo/releases/download/$tag/$assetName"
-    $releaseManifest.download_url = $releaseManifest.exe_url
-    Write-JsonFile $releaseManifest $distReleaseManifestPath
-    New-Item -ItemType Directory -Force -Path (Split-Path $distVersionPath) | Out-Null
-    Write-JsonFile $releaseManifest $configVersionPath
-    Write-JsonFile $releaseManifest (Join-Path $root "config\dev_version.json")
-    Write-JsonFile $releaseManifest $distVersionPath
-
-    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exePath).Hash.ToLower()
-    [IO.File]::WriteAllText($shaPath, "$hash  $assetName`n", [Text.UTF8Encoding]::new($false))
+        --manifest $distReleaseManifestPath
 }
 
 Invoke-Step "Generate release notes" {
@@ -230,7 +219,7 @@ Invoke-Step "Generate release notes" {
 - Channel: dev
 - Build time: $buildTime
 - Git commit: $commit
-- Completed modules: workflow UI, async build workflow, version sync, release asset generation
+- Completed modules: production installer release, updater SHA-first manifest, version sync, release asset generation
 - Parser coverage: semantic-core, booking-so-parser, import DS2/INV/PKG/B/L workflow, export booking/S/O workflow
 - Compare coverage: declaration/document field compare, booking/export field compare, missing document status
 "@
@@ -275,6 +264,6 @@ Write-Host ""
 Write-Host "DEV release pipeline complete."
 Write-Host "Version: $Version"
 Write-Host "Tag: $tag"
-Write-Host "EXE: $exePath"
+Write-Host "Installer: $exePath"
 Write-Host "SHA256: $shaPath"
 Write-Host "Manifest: $distReleaseManifestPath"

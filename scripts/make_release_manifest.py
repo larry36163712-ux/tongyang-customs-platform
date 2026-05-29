@@ -14,7 +14,9 @@ def main() -> None:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--exe", required=True)
+    parser.add_argument("--app-exe", default="")
     parser.add_argument("--asset-name", default="")
+    parser.add_argument("--package-type", default="exe", choices=("exe", "installer"))
     parser.add_argument("--output", default="version.json")
     parser.add_argument("--channel", default="stable", choices=("stable", "dev"))
     parser.add_argument("--build-time", default="")
@@ -22,12 +24,14 @@ def main() -> None:
     parser.add_argument("--minimum-supported-version", default="")
     args = parser.parse_args()
 
-    exe_path = Path(args.exe)
-    digest = hashlib.sha256(exe_path.read_bytes()).hexdigest()
-    asset_name = args.asset_name or exe_path.name
+    package_path = Path(args.exe)
+    package_digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
+    app_path = Path(args.app_exe) if args.app_exe else package_path
+    app_digest = hashlib.sha256(app_path.read_bytes()).hexdigest()
+    asset_name = args.asset_name or package_path.name
     encoded_name = quote(asset_name)
     build_time = args.build_time or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    build_id = f"{args.version.lstrip('v')}-{digest[:12]}"
+    build_id = f"{args.version.lstrip('v')}-{app_digest[:12]}"
     release_id = args.tag
     exe_url = f"https://github.com/{args.repo}/releases/latest/download/{encoded_name}"
     release_notes = args.release_notes or f"{args.channel.title()} release {args.tag}"
@@ -38,13 +42,16 @@ def main() -> None:
         "channel": args.channel,
         "exe_url": exe_url,
         "download_url": exe_url,
-        "sha256": digest,
+        "sha256": app_digest,
+        "app_sha256": app_digest,
         "build_id": build_id,
         "build_time": build_time,
         "release_id": release_id,
         "release_notes": release_notes,
         "notes": release_notes,
         "minimum_supported_version": minimum_supported_version,
+        "package_type": args.package_type,
+        "package_sha256": package_digest,
     }
     Path(args.output).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

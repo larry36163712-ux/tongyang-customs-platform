@@ -280,6 +280,8 @@ class V2Updater:
             temp_dir / "AI_Customs_ERP_V2.update.exe",
             temp_dir / "AI_Customs_ERP_V2_update.bat",
             temp_dir / "TongYangCustomsPlatform.update.exe",
+            temp_dir / "TongYangCustomsPlatform_Setup.update.exe",
+            temp_dir / "TongYangCustomsPlatform_setup_update.bat",
         ]
         removed: list[str] = []
         for path in candidates:
@@ -418,9 +420,21 @@ class V2Updater:
         sha256 = str(manifest.get("sha256", "")).strip().lower()
         if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
             raise RuntimeError("version.json invalid sha256")
+        app_sha256 = str(manifest.get("app_sha256") or sha256).strip().lower()
+        package_sha256 = str(manifest.get("package_sha256") or sha256).strip().lower()
+        package_type = str(manifest.get("package_type") or "exe").strip().lower()
+        if package_type not in {"exe", "installer"}:
+            raise RuntimeError("version.json invalid package_type")
+        if app_sha256 != sha256:
+            raise RuntimeError("version.json sha256 must match app_sha256")
+        for label, value in (("app_sha256", app_sha256), ("package_sha256", package_sha256)):
+            if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+                raise RuntimeError(f"version.json invalid {label}")
         exe_url = str(manifest.get("exe_url", "")).strip()
         if not (exe_url.endswith("/TongYangCustomsPlatform.exe") or exe_url.endswith("/TongYangCustomsPlatform_Setup.exe")):
             raise RuntimeError("version.json exe_url must point to TongYangCustomsPlatform.exe or TongYangCustomsPlatform_Setup.exe")
+        if package_type == "installer" and not exe_url.endswith("/TongYangCustomsPlatform_Setup.exe"):
+            raise RuntimeError("installer version.json exe_url must point to TongYangCustomsPlatform_Setup.exe")
         if channel == "stable" and "/releases/latest/download/" not in exe_url:
             raise RuntimeError("stable version.json exe_url must use /releases/latest/download/")
         if channel == "dev" and "/releases/download/" not in exe_url:

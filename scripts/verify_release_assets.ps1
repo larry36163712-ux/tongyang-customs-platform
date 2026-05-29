@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Repo,
     [Parameter(Mandatory = $true)][string]$Tag,
-    [string[]]$RequiredAssets = @("TongYangCustomsPlatform.exe", "version.json", "SHA256.txt"),
+    [string[]]$RequiredAssets = @("TongYangCustomsPlatform_Setup.exe", "version.json", "SHA256.txt"),
     [switch]$RequireLatest
 )
 
@@ -30,7 +30,7 @@ foreach ($required in $RequiredAssets) {
     }
 }
 
-$officialExeName = "TongYangCustomsPlatform.exe"
+$officialExeName = "TongYangCustomsPlatform_Setup.exe"
 $exeAsset = $release.assets | Where-Object { $_.name -eq $officialExeName } | Select-Object -First 1
 if (-not $exeAsset.browser_download_url) {
     throw "$officialExeName is missing browser_download_url."

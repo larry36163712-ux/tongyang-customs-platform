@@ -12,6 +12,22 @@ from pathlib import Path
 APP_DIR_NAME = "TongYangCustomsPlatform"
 APP_EXE_NAME = "TongYangCustomsPlatform.exe"
 APP_DISPLAY_NAME = "通洋報關平台"
+SETUP_EXE_NAME = "TongYangCustomsPlatform_Setup.exe"
+LEGACY_CHINESE_EXE_NAME = "通洋報關平台.exe"
+UPDATE_SCRIPT_NAMES = (
+    "AI_Customs_ERP_V2_update.bat",
+    "TongYangCustomsPlatform_setup_update.bat",
+    "update.bat",
+)
+DESKTOP_ARTIFACT_NAMES = (
+    APP_EXE_NAME,
+    SETUP_EXE_NAME,
+    LEGACY_CHINESE_EXE_NAME,
+    "AI_Customs_ERP_V2.update.exe",
+    "TongYangCustomsPlatform.update.exe",
+    "TongYangCustomsPlatform_Setup.update.exe",
+    "SHA256.txt",
+)
 
 
 def production_root() -> Path:
@@ -45,9 +61,9 @@ def ensure_runtime_layout(relaunch: bool = True) -> dict[str, object]:
     """Install the frozen EXE into the single production runtime directory.
 
     In production, every shortcut and updater operation should point to
-    %LOCALAPPDATA%/TongYangCustomsPlatform/TongYangCustomsPlatform.exe. If the
-    user launches a copied EXE from Downloads, Desktop, or dist, we copy that
-    EXE into the production directory and relaunch the production copy.
+    Program Files/TongYangCustomsPlatform/TongYangCustomsPlatform.exe. If the
+    user launches a copied EXE from Downloads, Desktop, or dist, we attempt to
+    copy that EXE into the production directory and relaunch the production copy.
     """
 
     state: dict[str, object] = {
@@ -64,28 +80,39 @@ def ensure_runtime_layout(relaunch: bool = True) -> dict[str, object]:
         return state
 
     root = production_root()
-    for dirname in ("logs", "cache", "config"):
-        (root / dirname).mkdir(parents=True, exist_ok=True)
+    try:
+        for dirname in ("logs", "cache", "config", "runtime"):
+            (root / dirname).mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        state["layout_error"] = f"{type(exc).__name__}: {exc}"
+        return state
 
     current = Path(sys.executable).resolve()
     target = production_exe_path()
     if current != target:
-        _copy_if_changed(current, target)
-        _copy_runtime_manifest(current.parent, root)
-        state["installed"] = True
-        state["cleanup_removed"] = cleanup_update_artifacts(root)
-        shortcut_state = ensure_shortcuts(target)
-        state["shortcut_target"] = str(target)
-        state["shortcuts"] = shortcut_state
-        if relaunch:
-            _launch_hidden(target)
-            state["relaunching"] = True
+        try:
+            _copy_if_changed(current, target)
+            _copy_runtime_manifest(current.parent, root)
+            state["installed"] = True
+            state["cleanup_removed"] = cleanup_update_artifacts(root)
+            shortcut_state = ensure_shortcuts(target)
+            state["shortcut_target"] = str(target)
+            state["shortcuts"] = shortcut_state
+            if relaunch:
+                _launch_hidden(target)
+                state["relaunching"] = True
+                return state
+        except OSError as exc:
+            state["layout_error"] = f"{type(exc).__name__}: {exc}"
+            state["cleanup_removed"] = cleanup_update_artifacts(root)
+            state["desktop_cleanup_removed"] = cleanup_desktop_artifacts(target)
             return state
 
     state["cleanup_removed"] = cleanup_update_artifacts(root)
     shortcut_state = ensure_shortcuts(target)
     state["shortcut_target"] = str(target)
     state["shortcuts"] = shortcut_state
+    state["desktop_cleanup_removed"] = cleanup_desktop_artifacts(target)
     return state
 
 
@@ -103,6 +130,8 @@ def cleanup_update_artifacts(root: Path | None = None) -> list[str]:
         temp_dir / "AI_Customs_ERP_V2.update.exe",
         temp_dir / "AI_Customs_ERP_V2_update.bat",
         temp_dir / "TongYangCustomsPlatform.update.exe",
+        temp_dir / "TongYangCustomsPlatform_Setup.update.exe",
+        temp_dir / "TongYangCustomsPlatform_setup_update.bat",
     ]
     directories = [
         root / "cache" / "updater",
@@ -126,6 +155,39 @@ def cleanup_update_artifacts(root: Path | None = None) -> list[str]:
                 removed.append(str(path))
         except OSError:
             pass
+    return removed
+
+
+def cleanup_desktop_artifacts(production_exe: Path | None = None) -> list[str]:
+    """Remove known deployment leftovers from Desktop folders.
+
+    The cleanup is intentionally conservative: only exact release/update
+    artifact names are removed. User documents and unrelated shortcuts are left
+    alone.
+    """
+
+    exe = (production_exe or production_exe_path()).resolve()
+    removed: list[str] = []
+    for directory in _desktop_dirs():
+        for name in DESKTOP_ARTIFACT_NAMES:
+            path = directory / name
+            try:
+                if not path.exists() or not path.is_file():
+                    continue
+                if path.resolve() == exe:
+                    continue
+                path.unlink()
+                removed.append(str(path))
+            except OSError:
+                continue
+        for name in UPDATE_SCRIPT_NAMES:
+            path = directory / name
+            try:
+                if path.exists() and path.is_file():
+                    path.unlink()
+                    removed.append(str(path))
+            except OSError:
+                continue
     return removed
 
 
@@ -164,7 +226,8 @@ foreach ($dir in $scanDirs) {
       $target = [string]$sc.TargetPath
       $targetName = ""
       if ($target) { $targetName = [IO.Path]::GetFileName($target) }
-      $looksRelated = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關"
+      $isCanonical = ($lnk.FullName -eq (Join-Path $desktop ($name + ".lnk"))) -or ($lnk.FullName -eq (Join-Path $startMenu ($name + ".lnk")))
+      $looksRelated = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關|报关"
       if ($looksRelated -and $target -ne $exe) {
         $before = $target
         $sc.TargetPath = $exe
@@ -176,6 +239,14 @@ foreach ($dir in $scanDirs) {
           target_path = $sc.TargetPath
           previous_target_path = $before
           action = "repaired_old_shortcut"
+        }
+      } elseif ($looksRelated -and -not $isCanonical) {
+        Remove-Item -LiteralPath $lnk.FullName -Force -ErrorAction SilentlyContinue
+        $rows += [pscustomobject]@{
+          shortcut_path = $lnk.FullName
+          target_path = $target
+          previous_target_path = $target
+          action = "removed_duplicate_shortcut"
         }
       }
     } catch {
@@ -213,7 +284,7 @@ foreach ($dir in $dirs) {
       $target = [string]$sc.TargetPath
       $targetName = ""
       if ($target) { $targetName = [IO.Path]::GetFileName($target) }
-      $looksRelated = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關"
+      $looksRelated = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關|报关"
       if (-not $looksRelated) { continue }
       $rows += [pscustomobject]@{
         shortcut_path = $lnk.FullName
@@ -259,6 +330,17 @@ def _copy_runtime_manifest(source_dir: Path, target_root: Path) -> None:
         target_config = target_root / "config"
         target_config.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_manifest, target_config / "version.json")
+
+
+def _desktop_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    user_profile = os.environ.get("USERPROFILE")
+    public = os.environ.get("PUBLIC")
+    if user_profile:
+        candidates.append(Path(user_profile) / "Desktop")
+    if public:
+        candidates.append(Path(public) / "Desktop")
+    return [path for path in candidates if path.exists()]
 
 
 def _launch_hidden(exe: Path) -> None:
