@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import os
 import shutil
@@ -87,8 +88,36 @@ def _copy_payload(root: Path) -> dict[str, str]:
         destination = root / ("config" if name == "version.json" else "") / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    _finalize_installed_manifest(root, target_exe)
 
     return {"install_root": str(root), "exe": str(target_exe)}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _finalize_installed_manifest(root: Path, target_exe: Path) -> None:
+    manifest_path = root / "config" / "version.json"
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        if isinstance(manifest, dict):
+            manifest["sha256"] = _sha256(target_exe)
+            manifest["app_sha256"] = manifest["sha256"]
+            if getattr(sys, "frozen", False):
+                manifest["package_sha256"] = _sha256(Path(sys.executable))
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+    except Exception:
+        return
 
 
 def _grant_runtime_permissions(root: Path) -> list[dict[str, str]]:
