@@ -1,17 +1,17 @@
-{
-  "app_name": "通洋報關平台",
-  "version": "1.1.9",
-  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform_Setup.exe",
-  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform_Setup.exe",
-  "sha256": "93d49cd963c5c4040fa65b7ba42448bc154f1acf05c6d22b29500486044886aa",
-  "app_sha256": "93d49cd963c5c4040fa65b7ba42448bc154f1acf05c6d22b29500486044886aa",
-  "build_id": "1.1.9-93d49cd963c5",
-  "channel": "stable",
-  "release_notes": "STABLE release v1.1.9 - Phase 1 production runtime installer updater stabilization",
-  "notes": "STABLE release v1.1.9 - Phase 1 production runtime installer updater stabilization",
-  "build_time": "2026-05-29T04:46:33+00:00",
-  "minimum_supported_version": "1.1.9",
-  "release_id": "v1.1.9",
-  "package_type": "installer",
-  "package_sha256": "7c750d55fbe48cff8f24ee6d5b8f4244d5641a9c9bd041263199d439f7848221"
+﻿{
+    "app_name":  "通洋報關平台",
+    "version":  "1.1.9",
+    "channel":  "stable",
+    "exe_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform_Setup.exe",
+    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform_Setup.exe",
+    "sha256":  "bbede2177ca765589eaf2fca125b4e5c31847bab7552cd20c7a19a5d05b9842f",
+    "app_sha256":  "bbede2177ca765589eaf2fca125b4e5c31847bab7552cd20c7a19a5d05b9842f",
+    "build_id":  "1.1.9-bbede2177ca7",
+    "build_time":  "2026-05-29T06:25:52+00:00",
+    "release_id":  "v1.1.9",
+    "release_notes":  "STABLE release v1.1.9 - Phase 1 final installer runtime permission verification",
+    "notes":  "STABLE release v1.1.9 - Phase 1 final installer runtime permission verification",
+    "minimum_supported_version":  "1.1.9",
+    "package_type":  "installer",
+    "package_sha256":  "1186bfa2cce9aaa5aa1f4b7e38490884520ad817e7f4897ee88134c9c925c295"
 }

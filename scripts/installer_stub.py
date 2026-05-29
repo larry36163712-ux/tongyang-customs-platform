@@ -91,6 +91,39 @@ def _copy_payload(root: Path) -> dict[str, str]:
     return {"install_root": str(root), "exe": str(target_exe)}
 
 
+def _grant_runtime_permissions(root: Path) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    # Builtin Users SID avoids localized group-name issues on Chinese Windows.
+    users_sid = "*S-1-5-32-545"
+    for path in (root / "logs", root / "cache", root / "config", root / "runtime"):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            completed = subprocess.run(
+                [
+                    "icacls",
+                    str(path),
+                    "/grant",
+                    f"{users_sid}:(OI)(CI)M",
+                    "/T",
+                    "/C",
+                ],
+                capture_output=True,
+                text=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                check=False,
+            )
+            rows.append(
+                {
+                    "path": str(path),
+                    "returncode": str(completed.returncode),
+                    "status": "ok" if completed.returncode == 0 else "failed",
+                }
+            )
+        except Exception as exc:
+            rows.append({"path": str(path), "returncode": "", "status": f"{type(exc).__name__}: {exc}"})
+    return rows
+
+
 def _ensure_shortcuts(exe: Path) -> list[dict[str, str]]:
     script = r'''
 $ErrorActionPreference = "Stop"
@@ -214,12 +247,14 @@ def main() -> int:
 
     root = _program_files_root()
     install_state = _copy_payload(root)
+    permissions = _grant_runtime_permissions(root)
     shortcuts = _ensure_shortcuts(Path(install_state["exe"]))
     desktop_cleanup = _cleanup_desktop_artifacts(Path(install_state["exe"]))
     state = {
         "status": "installed",
         "root": str(root),
         "exe": install_state["exe"],
+        "permissions": permissions,
         "shortcuts": shortcuts,
         "desktop_cleanup": desktop_cleanup,
         "silent": silent,

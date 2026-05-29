@@ -553,9 +553,14 @@ exit /b 0
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         line = f"[{stamp}] {message}\n"
         for path in (self.log_path, self.compat_log_path):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(line)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as handle:
+                    handle.write(line)
+            except OSError:
+                fallback = Path(tempfile.gettempdir()) / "TongYangCustomsPlatform_updater.log"
+                with fallback.open("a", encoding="utf-8") as handle:
+                    handle.write(line)
 
     def _emit_progress(self, progress: ProgressCallback | None, stage: str, percent: int, message: str) -> None:
         self._log(f"progress {stage} percent={percent} message={message}")

@@ -25,9 +25,14 @@ def log_runtime(message: str) -> None:
     meipass = getattr(sys, "_MEIPASS", "")
     line = f"[{stamp}] pid={os.getpid()} frozen={frozen} meipass={meipass} {message}\n"
     path = runtime_log_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(line)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+    except OSError:
+        fallback = Path(os.environ.get("TEMP", str(Path.home()))) / "TongYangCustomsPlatform_runtime.log"
+        with fallback.open("a", encoding="utf-8") as handle:
+            handle.write(line)
 
 
 def log_exception(context: str, exc: BaseException | None = None) -> str:
