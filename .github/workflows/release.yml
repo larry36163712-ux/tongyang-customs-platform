@@ -212,6 +212,14 @@ jobs:
           $repo = "${{ github.repository }}"
           $tag = "${{ steps.vars.outputs.tag }}"
           $channel = "${{ steps.vars.outputs.channel }}"
+          function Convert-HttpContentToText($Content) {
+            if ($Content -is [byte[]]) { return [Text.Encoding]::UTF8.GetString($Content) }
+            if ($Content -is [array]) {
+              $bytes = [byte[]]@($Content | ForEach-Object { [byte]$_ })
+              return [Text.Encoding]::UTF8.GetString($bytes)
+            }
+            return [string]$Content
+          }
           if ($channel -eq "stable") {
             $manifestUrl = "https://github.com/$repo/releases/latest/download/version.json"
             $exeUrl = "https://github.com/$repo/releases/latest/download/TongYangCustomsPlatform_Setup.exe"
@@ -224,11 +232,7 @@ jobs:
 
           $manifestResponse = Invoke-WebRequest -Method Get -Uri $manifestUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"; "Cache-Control" = "no-cache"} -UseBasicParsing
           if ($manifestResponse.StatusCode -ne 200) { throw "Manifest HTTP status was $($manifestResponse.StatusCode)" }
-          $manifestText = if ($manifestResponse.Content -is [byte[]]) {
-            [Text.Encoding]::UTF8.GetString($manifestResponse.Content)
-          } else {
-            [string]$manifestResponse.Content
-          }
+          $manifestText = Convert-HttpContentToText $manifestResponse.Content
           $manifest = $manifestText | ConvertFrom-Json
           foreach ($field in @("version", "channel", "exe_url", "release_notes", "minimum_supported_version", "sha256", "build_id", "build_time")) {
             if (-not $manifest.$field) { throw "version manifest missing field: $field" }
@@ -242,11 +246,7 @@ jobs:
           }
           $shaResponse = Invoke-WebRequest -Method Get -Uri $shaUrl -Headers @{"User-Agent" = "TongYangReleasePipeline"; "Cache-Control" = "no-cache"} -UseBasicParsing
           if ($shaResponse.StatusCode -ne 200) { throw "SHA256.txt HTTP status was $($shaResponse.StatusCode)" }
-          $shaText = if ($shaResponse.Content -is [byte[]]) {
-            [Text.Encoding]::UTF8.GetString($shaResponse.Content)
-          } else {
-            [string]$shaResponse.Content
-          }
+          $shaText = Convert-HttpContentToText $shaResponse.Content
           if ($shaText -notmatch [regex]::Escape($manifest.package_sha256)) { throw "SHA256.txt does not contain installer package_sha256" }
           if ($shaText -notmatch "TongYangCustomsPlatform_Setup\.exe") { throw "SHA256.txt does not reference TongYangCustomsPlatform_Setup.exe" }
 

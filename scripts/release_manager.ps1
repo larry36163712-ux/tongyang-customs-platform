@@ -58,6 +58,18 @@ function Get-ReleaseByTag {
     }
 }
 
+function Convert-HttpContentToText {
+    param($Content)
+    if ($Content -is [byte[]]) {
+        return [Text.Encoding]::UTF8.GetString($Content)
+    }
+    if ($Content -is [array]) {
+        $bytes = [byte[]]@($Content | ForEach-Object { [byte]$_ })
+        return [Text.Encoding]::UTF8.GetString($bytes)
+    }
+    return [string]$Content
+}
+
 function Remove-OldDevReleases {
     param([string]$KeepTag)
 
@@ -173,11 +185,7 @@ function Assert-ReleaseAssets {
     }
 
     $manifestResponse = Invoke-WebRequest -Method Get -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing
-    $manifestText = if ($manifestResponse.Content -is [byte[]]) {
-        [Text.Encoding]::UTF8.GetString($manifestResponse.Content)
-    } else {
-        [string]$manifestResponse.Content
-    }
+    $manifestText = Convert-HttpContentToText $manifestResponse.Content
     $manifest = $manifestText | ConvertFrom-Json
     $expectedLatestExeUrl = if ($Channel -eq "stable") {
         "https://github.com/$Repo/releases/latest/download/$OfficialExeName"
@@ -206,11 +214,7 @@ function Assert-ReleaseAssets {
     Invoke-WebRequest -Method Head -Uri $manifestExeUrl -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing | Out-Null
     $shaAsset = $release.assets | Where-Object { $_.name -eq "SHA256.txt" } | Select-Object -First 1
     $shaResponse = Invoke-WebRequest -Method Get -Uri $shaAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing
-    $shaText = if ($shaResponse.Content -is [byte[]]) {
-        [Text.Encoding]::UTF8.GetString($shaResponse.Content)
-    } else {
-        [string]$shaResponse.Content
-    }
+    $shaText = Convert-HttpContentToText $shaResponse.Content
     if ($shaText -notlike "*$($manifest.package_sha256)*") {
         throw "SHA256.txt does not contain installer package_sha256. package_sha256=$($manifest.package_sha256) sha_text=$shaText"
     }
