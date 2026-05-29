@@ -26,8 +26,12 @@ class SmartDocumentSplitter:
                     confidence=max(candidate.confidence, self._confidence(detected, intake.text)),
                     document_confidence=candidate.confidence,
                     candidates=self.semantic_classifier.classify(intake.text, intake.path.name),
-                    manual_confirm_reason=self._manual_reason(candidate),
-                    debug={"split_reason": "single-document", "understanding_reasons": candidate.reasons},
+                    manual_confirm_reason=self._manual_reason(candidate, intake),
+                    debug={
+                        "split_reason": "single-document",
+                        "understanding_reasons": candidate.reasons,
+                        **self._intake_debug(intake),
+                    },
                 )
             ]
 
@@ -65,8 +69,13 @@ class SmartDocumentSplitter:
             confidence=max(candidate.confidence, self._confidence(document_type, text)),
             document_confidence=candidate.confidence,
             candidates=candidates,
-            manual_confirm_reason=self._manual_reason(candidate),
-            debug={"split_reason": "page-type-change", "page_count": len(pages), "understanding_reasons": candidate.reasons},
+            manual_confirm_reason=self._manual_reason(candidate, intake),
+            debug={
+                "split_reason": "page-type-change",
+                "page_count": len(pages),
+                "understanding_reasons": candidate.reasons,
+                **self._intake_debug(intake),
+            },
         )
 
     def _confidence(self, document_type: DocumentType, text: str) -> float:
@@ -76,7 +85,12 @@ class SmartDocumentSplitter:
             return 0.3
         return 0.75
 
-    def _manual_reason(self, candidate) -> str:
+    def _manual_reason(self, candidate, intake: IntakeFile | None = None) -> str:
+        if intake and intake.debug.get("ocr_status") == "manual_review":
+            return str(
+                intake.debug.get("ocr_message")
+                or "此文件可能為掃描檔，OCR 未取得足夠文字，請人工確認文件內容。"
+            )
         if not candidate.needs_manual_confirm:
             return ""
         if candidate.document_type == DocumentType.DS2_DECLARATION:
@@ -88,3 +102,10 @@ class SmartDocumentSplitter:
         if candidate.document_type == DocumentType.UNKNOWN:
             return "AI 無法完全辨識此文件，請人工確認文件用途。"
         return "AI 辨識信心不足，需人工確認文件類型。"
+
+    def _intake_debug(self, intake: IntakeFile) -> dict[str, object]:
+        return {
+            key: value
+            for key, value in intake.debug.items()
+            if key in {"ocr_status", "ocr_message", "stage"}
+        }

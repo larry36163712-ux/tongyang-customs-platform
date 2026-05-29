@@ -16,6 +16,7 @@ from v2.workflow.cache import WorkflowCache
 from v2.workflow.intake import FileIntakeEngine
 from v2.workflow.matcher import WorkflowMatcher
 from v2.workflow.models import WorkflowResult
+from v2.workflow.organizer import CustomsCaseOrganizer
 from v2.workflow.splitter import SmartDocumentSplitter
 
 
@@ -56,6 +57,7 @@ class DocumentWorkflowEngine:
             self.rules = RuleEngine(rules_path or resource_path("config", "rules"))
             log_runtime(f"rule engine initialized rules_path={self.rules.rules_path} rule_count={len(self.rules.rules)}")
             self.audit_summary = AIAuditSummaryEngine()
+            self.organizer = CustomsCaseOrganizer()
             self.confidence = ConfidenceEngine()
             self.state_machine = WorkflowStateMachine()
             self.folder_intake = IntakePipeline(self.cache)
@@ -232,6 +234,7 @@ class DocumentWorkflowEngine:
                 confidence = self.confidence.assess_case(case)
                 case.workflow_state = self.state_machine.resolve(case, confidence.is_low_confidence).value
                 self.audit_summary.summarize_case(case)
+                self.organizer.organize_case(case)
                 log_runtime(f"audit case completed case_id={case.case_id} status={case.status.value} state={case.workflow_state}")
             emit("audit", 94, f"completed: audited {len(cases)} workflow case(s)")
         except Exception as exc:

@@ -61,17 +61,26 @@ from v2.workflow import CaseWorkflow, DocumentWorkflowEngine, WorkflowResult
 from v2.workflow.models import CaseStatus
 
 
+SUPPORTED_DROP_SUFFIXES = {".pdf", ".txt", ".csv", ".tsv", ".xlsx", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
+
+
 DOCUMENT_LABELS = {
     DocumentType.DS2_DECLARATION: "DS2 報單",
     DocumentType.INVOICE: "INV",
-    DocumentType.PACKING_LIST: "PKG",
+    DocumentType.PACKING_LIST: "PL",
     DocumentType.BILL_OF_LADING: "B/L",
     DocumentType.ARRIVAL_NOTICE: "到貨通知",
     DocumentType.DELIVERY_ORDER: "D/O",
+    DocumentType.MANIFEST: "艙單",
+    DocumentType.SHIPPING_ORDER: "SO",
+    DocumentType.BOOKING: "Booking",
+    DocumentType.BOOKING_CONFIRMATION: "Booking",
+    DocumentType.EXPORT_DECLARATION: "出口報單",
+    DocumentType.TAX_SHEET: "稅單",
     DocumentType.CLEARANCE_LIST: "清表",
     DocumentType.DATA_CLEARANCE: "資料清表",
     DocumentType.MATERIAL_CLEARANCE: "用料清表",
-    DocumentType.DRAWBACK_CLEARANCE: "核退清表",
+    DocumentType.DRAWBACK_CLEARANCE: "核退標準",
     DocumentType.UNKNOWN: "尚未成功辨識",
 }
 
@@ -154,19 +163,31 @@ class DocumentDropList(QListWidget):
         self.setObjectName("UploadList")
 
     def dragEnterEvent(self, event) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls():
+        if _has_supported_drop(event.mimeData()):
+            self.setProperty("dragActive", True)
+            self.style().unpolish(self)
+            self.style().polish(self)
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls():
+        if _has_supported_drop(event.mimeData()):
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
+    def dragLeaveEvent(self, event) -> None:  # type: ignore[override]
+        self.setProperty("dragActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event) -> None:  # type: ignore[override]
-        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        self.setProperty("dragActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        paths = _paths_from_mime(event.mimeData())
         if paths:
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
@@ -183,7 +204,7 @@ class WorkflowDropPanel(QFrame):
         self.setObjectName("WorkflowUpload")
 
     def dragEnterEvent(self, event) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls():
+        if _has_supported_drop(event.mimeData()):
             self.setProperty("dragActive", True)
             self.style().unpolish(self)
             self.style().polish(self)
@@ -192,7 +213,7 @@ class WorkflowDropPanel(QFrame):
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls():
+        if _has_supported_drop(event.mimeData()):
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
@@ -207,12 +228,24 @@ class WorkflowDropPanel(QFrame):
         self.setProperty("dragActive", False)
         self.style().unpolish(self)
         self.style().polish(self)
-        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        paths = _paths_from_mime(event.mimeData())
         if paths:
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+
+def _paths_from_mime(mime_data) -> list[str]:
+    return [url.toLocalFile() for url in mime_data.urls() if url.isLocalFile()]
+
+
+def _has_supported_drop(mime_data) -> bool:
+    for path_text in _paths_from_mime(mime_data):
+        path = Path(path_text)
+        if path.is_dir() or path.suffix.lower() in SUPPORTED_DROP_SUFFIXES:
+            return True
+    return False
 
 
 class ToastNotification(QFrame):
@@ -451,8 +484,8 @@ class CustomsErpWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("通洋報關平台")
-        self.resize(1440, 900)
-        self.setMinimumSize(1280, 780)
+        self.resize(1480, 920)
+        self.setMinimumSize(1180, 760)
 
         self.settings: V2Settings = load_settings()
         self.parser = SemanticParserEngine()
@@ -540,7 +573,7 @@ class CustomsErpWindow(QMainWindow):
         self.stack.addWidget(self._direction_workflow_page("import", "進口核對", "INV / PKG / B/L / 清表 / Arrival Notice / DS2 PDF / DS2 TXT"))
         self.stack.addWidget(self._direction_workflow_page("export", "出口核對", "INV / PKG / S/O / Booking / Booking Confirmation / Shipping Order / B/L / 裝箱明細 / 清表 / 出口報單"))
         self.stack.addWidget(self._print_page())
-        self.stack.addWidget(self._analytics_page())
+        self.analytics_page_index = self.stack.addWidget(self._analytics_page())
 
         layout.addWidget(sidebar)
         layout.addWidget(self.stack, 1)
@@ -562,14 +595,11 @@ class CustomsErpWindow(QMainWindow):
 
         brand = QLabel("通洋報關平台")
         brand.setObjectName("Brand")
-        subtitle = QLabel("AI Customs ERP")
-        subtitle.setObjectName("Subtitle")
         sidebar_layout.addWidget(brand)
-        sidebar_layout.addWidget(subtitle)
-        sidebar_layout.addSpacing(10)
+        sidebar_layout.addSpacing(8)
 
         self.nav.setObjectName("Nav")
-        for label in ("案件工作流", "進口核對", "出口核對", "一鍵印單", "回測分析"):
+        for label in ("案件工作台", "進口核對", "出口核對", "一鍵印單"):
             item = QListWidgetItem(label)
             item.setSizeHint(item.sizeHint().expandedTo(item.sizeHint()))
             self.nav.addItem(item)
@@ -583,30 +613,27 @@ class CustomsErpWindow(QMainWindow):
         return sidebar
 
     def _case_workflow_page(self) -> QWidget:
-        return self._workflow_page("case", "AI Customs Audit Workspace", "import")
+        return self._workflow_page("case", "報關案件工作台", "import")
 
     def _workflow_page(self, view_name: str, title_text: str, direction: str) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
 
         header_row = QHBoxLayout()
         title = QLabel(title_text)
         title.setObjectName("PageTitle")
-        mode = QComboBox()
-        mode.addItems(["import", "export"])
-        mode.setCurrentText(direction)
-        mode.setObjectName("WorkflowMode")
+        direction_label = QLabel("進口核對" if direction == "import" else "出口核對")
+        direction_label.setObjectName("DirectionBadge")
         header_row.addWidget(title)
         header_row.addStretch(1)
-        header_row.addWidget(QLabel("案件類型"))
-        header_row.addWidget(mode)
+        header_row.addWidget(direction_label)
         layout.addLayout(header_row)
 
         upload_panel = WorkflowDropPanel()
-        upload_panel.setMaximumHeight(128)
-        upload_panel.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
+        upload_panel.setMaximumHeight(118)
+        upload_panel.files_dropped.connect(lambda paths: self._run_workflow(paths, direction, view_name))
         upload_layout = QVBoxLayout(upload_panel)
         upload_layout.setContentsMargins(16, 10, 16, 10)
         upload_layout.setSpacing(7)
@@ -616,11 +643,11 @@ class CustomsErpWindow(QMainWindow):
         upload_list.addItem("拖曳 PDF / JPG / PNG / XLSX / CSV / TXT 或整個資料夾到這裡")
         upload_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         upload_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        upload_list.files_dropped.connect(lambda paths: self._run_workflow(paths, mode.currentText(), view_name))
+        upload_list.files_dropped.connect(lambda paths: self._run_workflow(paths, direction, view_name))
         upload_button = QPushButton("選擇文件")
-        upload_button.clicked.connect(lambda: self._choose_workflow_documents(mode.currentText(), view_name))
+        upload_button.clicked.connect(lambda: self._choose_workflow_documents(direction, view_name))
         folder_button = QPushButton("選擇資料夾")
-        folder_button.clicked.connect(lambda: self._choose_workflow_folder(mode.currentText(), view_name))
+        folder_button.clicked.connect(lambda: self._choose_workflow_folder(direction, view_name))
         upload_top.addWidget(upload_list, 1)
         upload_top.addWidget(upload_button)
         upload_top.addWidget(folder_button)
@@ -630,15 +657,15 @@ class CustomsErpWindow(QMainWindow):
         upload_progress = QProgressBar()
         upload_progress.setRange(0, 100)
         upload_progress.setValue(0)
-        upload_progress.setFormat("Upload %p%")
+        upload_progress.setFormat("文件匯入 %p%")
         ocr_progress = QProgressBar()
         ocr_progress.setRange(0, 100)
         ocr_progress.setValue(0)
-        ocr_progress.setFormat("OCR %p%")
+        ocr_progress.setFormat("OCR 辨識 %p%")
         workflow_progress = QProgressBar()
         workflow_progress.setRange(0, 100)
         workflow_progress.setValue(0)
-        workflow_progress.setFormat("AI Audit %p%")
+        workflow_progress.setFormat("AI 核對 %p%")
         progress_row.addWidget(upload_progress)
         progress_row.addWidget(ocr_progress)
         progress_row.addWidget(workflow_progress)
@@ -678,6 +705,7 @@ class CustomsErpWindow(QMainWindow):
         document_cards.setObjectName("DocumentCards")
         document_cards.setSpacing(10)
         document_cards.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        document_cards.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         document_cards.itemClicked.connect(lambda item, view=view_name: self._on_document_card_clicked(item, view))
 
         compare_table = QTableWidget()
@@ -688,11 +716,13 @@ class CustomsErpWindow(QMainWindow):
         compare_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         compare_table.horizontalHeader().setStretchLastSection(True)
         compare_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        compare_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         compare_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         compare_table.setWordWrap(True)
         compare_table.setSortingEnabled(True)
-        compare_table.setMinimumHeight(430)
-        compare_table.verticalHeader().setDefaultSectionSize(46)
+        compare_table.setAlternatingRowColors(True)
+        compare_table.setMinimumHeight(180)
+        compare_table.verticalHeader().setDefaultSectionSize(54)
 
         compare_search = QLineEdit()
         compare_search.setPlaceholderText("搜尋欄位或文件")
@@ -706,7 +736,8 @@ class CustomsErpWindow(QMainWindow):
         audit_report_view.setReadOnly(True)
         audit_report_view.setObjectName("AuditReportView")
         audit_report_view.setPlaceholderText("完成文件讀取後，這裡會產生正式報關核對報告")
-        audit_report_view.setMaximumHeight(170)
+        audit_report_view.setMaximumHeight(155)
+        audit_report_view.setMinimumHeight(95)
         audit_report_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         audit_report_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -714,7 +745,8 @@ class CustomsErpWindow(QMainWindow):
         audit_summary.setReadOnly(True)
         audit_summary.setObjectName("RiskSummaryCard")
         audit_summary.setPlaceholderText("異常摘要 / 高風險提示")
-        audit_summary.setMaximumHeight(150)
+        audit_summary.setMaximumHeight(120)
+        audit_summary.setMinimumHeight(76)
         audit_summary.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         audit_summary.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -731,7 +763,7 @@ class CustomsErpWindow(QMainWindow):
         left_panel = QFrame()
         left_panel.setObjectName("AuditSidePanel")
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(4, 4, 4, 4)
+        left_layout.setContentsMargins(12, 12, 12, 12)
         left_layout.setSpacing(12)
         left_title = QLabel("報關案件文件區")
         left_title.setObjectName("PanelTitle")
@@ -742,7 +774,7 @@ class CustomsErpWindow(QMainWindow):
         audit_workspace = QFrame()
         audit_workspace.setObjectName("AuditWorkspace")
         center = QVBoxLayout(audit_workspace)
-        center.setContentsMargins(4, 4, 4, 4)
+        center.setContentsMargins(12, 12, 12, 12)
         center.setSpacing(12)
         status_line = QHBoxLayout()
         status_label = QLabel("● 等待文件")
@@ -755,7 +787,7 @@ class CustomsErpWindow(QMainWindow):
         report_title = QLabel("案件摘要 / AI 建議")
         report_title.setObjectName("PanelTitle")
         center.addWidget(report_title)
-        center.addWidget(audit_report_view, 1)
+        center.addWidget(audit_report_view, 0)
         table_tools = QHBoxLayout()
         table_title = QLabel("海關核對差異表")
         table_title.setObjectName("PanelTitle")
@@ -764,7 +796,7 @@ class CustomsErpWindow(QMainWindow):
         table_tools.addWidget(compare_search)
         table_tools.addWidget(compare_only_issues)
         center.addLayout(table_tools)
-        center.addWidget(compare_table, 7)
+        center.addWidget(compare_table, 10)
 
         risk_panel = QFrame()
         risk_panel.setObjectName("AuditSummaryPanel")
@@ -777,7 +809,7 @@ class CustomsErpWindow(QMainWindow):
         summary_layout.addWidget(audit_summary)
         summary_layout.addWidget(debug_toggle)
         summary_layout.addWidget(self.workflow_debug)
-        center.addWidget(risk_panel, 2)
+        center.addWidget(risk_panel, 0)
         self.workflow_debug.hide()
         debug_toggle.setVisible(self.settings.developer_mode)
 
@@ -785,7 +817,7 @@ class CustomsErpWindow(QMainWindow):
         body.addWidget(audit_workspace)
         body.setStretchFactor(0, 30)
         body.setStretchFactor(1, 70)
-        body.setSizes([390, 910])
+        body.setSizes([360, 900])
         layout.addWidget(body, 1)
         self.workflow_views[view_name] = {
             "tree": None,
@@ -805,7 +837,7 @@ class CustomsErpWindow(QMainWindow):
             "ocr_progress": ocr_progress,
             "workflow_progress": workflow_progress,
             "status_steps": status_steps,
-            "mode": mode,
+            "mode": direction,
         }
         return page
 
@@ -854,7 +886,7 @@ class CustomsErpWindow(QMainWindow):
             self,
             "匯入案件文件",
             "",
-            "Documents (*.pdf *.txt *.csv *.tsv *.xlsx *.png *.jpg *.jpeg *.tif *.tiff);;All Files (*.*)",
+            "報關文件 (*.pdf *.txt *.csv *.tsv *.xlsx *.png *.jpg *.jpeg *.tif *.tiff);;所有檔案 (*.*)",
         )
         if paths:
             self._run_workflow(paths, direction, view_name)
@@ -871,16 +903,16 @@ class CustomsErpWindow(QMainWindow):
         view_name: str = "case",
         intake_mode: str = "files",
     ) -> None:
-        if intake_mode == "files":
-            folder_paths = [path for path in paths if Path(path).is_dir()]
-            file_paths = [path for path in paths if not Path(path).is_dir()]
-            if folder_paths and not file_paths and len(folder_paths) == 1:
-                intake_mode = "folder"
-            elif folder_paths:
-                expanded: list[str] = []
-                for folder in folder_paths:
-                    expanded.extend(str(item) for item in Path(folder).rglob("*") if item.is_file())
-                paths = file_paths + expanded
+        paths = self._expand_workflow_paths(paths)
+        intake_mode = "files"
+        if not paths:
+            self._show_toast(
+                "未加入文件",
+                "請拖曳 PDF / JPG / PNG / XLSX / CSV / TXT，或選擇包含支援格式的資料夾。",
+                action_visible=False,
+                timeout_ms=4500,
+            )
+            return
         if self.workflow_thread and self.workflow_thread.isRunning():
             self._show_toast("工作流處理中", "目前文件仍在處理。", action_visible=False, timeout_ms=3000)
             return
@@ -932,6 +964,22 @@ class CustomsErpWindow(QMainWindow):
         self.workflow_thread.finished.connect(self._clear_workflow_worker)
         self.workflow_thread.start()
 
+    def _expand_workflow_paths(self, paths: list[str]) -> list[str]:
+        expanded: list[str] = []
+        seen: set[str] = set()
+        for raw_path in paths:
+            path = Path(raw_path)
+            candidates = path.rglob("*") if path.is_dir() else [path]
+            for candidate in candidates:
+                if not candidate.is_file() or candidate.suffix.lower() not in SUPPORTED_DROP_SUFFIXES:
+                    continue
+                key = str(candidate.resolve()).casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                expanded.append(str(candidate))
+        return expanded
+
     @Slot(str, int, str)
     def _on_workflow_progress(self, stage: str, percent: int, message: str) -> None:
         view_name = self.workflow_thread.property("workflow_view") if self.workflow_thread else "case"
@@ -978,7 +1026,7 @@ class CustomsErpWindow(QMainWindow):
         runtime_log = logs_dir() / "runtime.log"
         if not self.settings.developer_mode:
             return (
-                "AI Customs Audit Report\n\n"
+                "報關核對報告\n\n"
                 "核對結果：✗ 系統處理中斷\n\n"
                 "說明：文件讀取或核對流程未完成，請先確認檔案是否可開啟、格式是否正確，再重新上傳。\n\n"
                 f"需處理事項：{self._human_workflow_message(stage, message)}"
@@ -994,9 +1042,9 @@ class CustomsErpWindow(QMainWindow):
     def _reset_workflow_progress(self, view_name: str) -> None:
         view = self.workflow_views.get(view_name, {})
         for key, text in (
-            ("upload_progress", "Upload 0%"),
-            ("ocr_progress", "OCR 0%"),
-            ("workflow_progress", "AI Audit 0%"),
+            ("upload_progress", "文件匯入 0%"),
+            ("ocr_progress", "OCR 辨識 0%"),
+            ("workflow_progress", "AI 核對 0%"),
         ):
             progress = view.get(key)
             if isinstance(progress, QProgressBar):
@@ -1021,7 +1069,7 @@ class CustomsErpWindow(QMainWindow):
         if isinstance(upload_progress, QProgressBar):
             upload_value = 100 if percent >= 8 else int(percent * 100 / 8)
             upload_progress.setValue(upload_value)
-            upload_progress.setFormat(f"Upload {upload_value}%")
+            upload_progress.setFormat(f"文件匯入 {upload_value}%")
         if isinstance(ocr_progress, QProgressBar):
             if percent < 8:
                 ocr_value = 0
@@ -1030,11 +1078,11 @@ class CustomsErpWindow(QMainWindow):
             else:
                 ocr_value = int((percent - 8) * 100 / 27)
             ocr_progress.setValue(min(100, ocr_value))
-            ocr_progress.setFormat(f"OCR {min(100, ocr_value)}%")
+            ocr_progress.setFormat(f"OCR 辨識 {min(100, ocr_value)}%")
         if isinstance(workflow_progress, QProgressBar):
             workflow_value = 0 if percent < 35 else int((percent - 35) * 100 / 65)
             workflow_progress.setValue(min(100, workflow_value))
-            workflow_progress.setFormat(f"AI Audit {min(100, workflow_value)}%")
+            workflow_progress.setFormat(f"AI 核對 {min(100, workflow_value)}%")
         steps = view.get("status_steps")
         if isinstance(steps, list):
             stage_index = {
@@ -1320,6 +1368,9 @@ class CustomsErpWindow(QMainWindow):
         return "\n".join(lines)
 
     def _format_case_workspace_summary(self, case: CaseWorkflow) -> str:
+        organizer = getattr(case, "case_organizer", None)
+        if organizer:
+            return organizer.human_text()
         status_key = self._case_status_key(case)
         status = {
             "completed": "✓ 可進行報關核對",
@@ -1449,6 +1500,7 @@ class CustomsErpWindow(QMainWindow):
             ("packing", "✓ 包裝單 PACKING"),
             ("arrival_notice", "⚠ 到貨通知"),
             ("delivery_order", "⚠ D/O"),
+            ("manifest", "⚠ 艙單"),
             ("shipping_order", "⚠ SO"),
             ("booking", "⚠ Booking"),
             ("bl", "✓ B/L"),
@@ -1474,7 +1526,8 @@ class CustomsErpWindow(QMainWindow):
             parsed = segment.parsed
             doc_type = parsed.document_type if parsed else segment.detected_type
             label = "尚未成功辨識" if doc_type == DocumentType.UNKNOWN else self._document_label(doc_type)
-            item = QListWidgetItem(f"⚠ {label}\n{segment.source_name}\n可能為掃描品質、格式或文件內容不足，請人工確認。")
+            detail = self._document_card_detail(segment)
+            item = QListWidgetItem(f"⚠ {label}\n{segment.source_name}{detail}")
             item.setData(Qt.ItemDataRole.UserRole, {"type": doc_type.value, "files": [segment.source_name]})
             list_widget.addItem(item)
         if not result.segments:
@@ -1486,6 +1539,7 @@ class CustomsErpWindow(QMainWindow):
             "packing": [],
             "arrival_notice": [],
             "delivery_order": [],
+            "manifest": [],
             "shipping_order": [],
             "booking": [],
             "bl": [],
@@ -1497,11 +1551,7 @@ class CustomsErpWindow(QMainWindow):
         }
         for segment in case.documents:
             doc_type = self._segment_effective_type(segment)
-            suffix = ""
-            best = segment.candidates[0] if segment.candidates else None
-            if best and best.needs_manual_confirm:
-                reason = segment.manual_confirm_reason or "AI 辨識信心不足，需人工確認"
-                suffix = f"\nAI 信心：{int(best.confidence * 100)}%\n狀態：需人工確認\n原因：{reason}"
+            suffix = self._document_card_detail(segment)
             if doc_type == DocumentType.INVOICE:
                 groups["invoice"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.PACKING_LIST:
@@ -1514,6 +1564,8 @@ class CustomsErpWindow(QMainWindow):
                 groups["arrival_notice"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.DELIVERY_ORDER:
                 groups["delivery_order"].append(segment.source_name + suffix)
+            elif doc_type == DocumentType.MANIFEST:
+                groups["manifest"].append(segment.source_name + suffix)
             elif doc_type == DocumentType.SHIPPING_ORDER:
                 groups["shipping_order"].append(segment.source_name + suffix)
             elif doc_type in {DocumentType.BOOKING, DocumentType.BOOKING_CONFIRMATION}:
@@ -1531,6 +1583,34 @@ class CustomsErpWindow(QMainWindow):
             if key in groups and not groups[key]:
                 groups[key].extend(f"疑似文件：{name}" for name in names)
         return groups
+
+    def _document_card_detail(self, segment) -> str:
+        best = segment.candidates[0] if segment.candidates else None
+        confidence = best.confidence if best else segment.document_confidence
+        confidence_line = f"AI 信心：{int(confidence * 100)}%" if confidence else "AI 信心：待確認"
+        ocr_status = self._ocr_status_label(segment)
+        status = "需人工確認" if segment.manual_confirm_reason or (best and best.needs_manual_confirm) else "已確認文件"
+        reasons: list[str] = []
+        if best and best.reasons:
+            reasons.append("特徵：" + "、".join(best.reasons[:3]))
+        if segment.manual_confirm_reason:
+            reasons.append("原因：" + segment.manual_confirm_reason)
+        if not reasons:
+            reasons.append("摘要：已擷取主要欄位，請依差異表覆核。")
+        return "\n" + "\n".join([confidence_line, f"OCR 狀態：{ocr_status}", f"狀態：{status}", *reasons[:2]])
+
+    def _ocr_status_label(self, segment) -> str:
+        status = str(segment.debug.get("ocr_status", ""))
+        message = str(segment.debug.get("ocr_message", ""))
+        if status == "manual_review":
+            return "需人工確認"
+        if message:
+            return "OCR 成功" if "缺少" not in message and "失敗" not in message else "需人工確認"
+        if segment.source_path.suffix.lower() == ".pdf":
+            return "可搜尋 PDF / 已讀取"
+        if segment.source_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+            return "OCR 已處理"
+        return "不需 OCR"
 
     def _segment_effective_type(self, segment) -> DocumentType:
         parsed = segment.parsed
@@ -1552,6 +1632,7 @@ class CustomsErpWindow(QMainWindow):
             "bl": "✗ B/L\n尚未提供",
             "arrival_notice": "",
             "delivery_order": "",
+            "manifest": "",
             "shipping_order": "",
             "booking": "",
             "tax_sheet": "",
@@ -1636,22 +1717,38 @@ class CustomsErpWindow(QMainWindow):
         text = str(value)
         mapping = {
             "DS2_DECLARATION": "DS2 報單",
+            DocumentType.DS2_DECLARATION.value: "DS2 報單",
             "EXPORT_DECLARATION": "出口報單",
+            DocumentType.EXPORT_DECLARATION.value: "出口報單",
             "BILL_OF_LADING": "B/L",
+            DocumentType.BILL_OF_LADING.value: "B/L",
             "PACKING_LIST": "PACKING",
+            DocumentType.PACKING_LIST.value: "PL",
             "INVOICE": "INV",
+            DocumentType.INVOICE.value: "INV",
             "ARRIVAL_NOTICE": "到貨通知",
+            DocumentType.ARRIVAL_NOTICE.value: "到貨通知",
             "DELIVERY_ORDER": "D/O",
+            DocumentType.DELIVERY_ORDER.value: "D/O",
+            "MANIFEST": "艙單",
+            DocumentType.MANIFEST.value: "艙單",
             "SHIPPING_ORDER": "SO",
+            DocumentType.SHIPPING_ORDER.value: "SO",
             "BOOKING_CONFIRMATION": "Booking",
             "BOOKING": "Booking",
             "TAX_SHEET": "稅單",
+            DocumentType.TAX_SHEET.value: "稅單",
             "CLEARANCE_LIST": "清表",
+            DocumentType.CLEARANCE_LIST.value: "清表",
             "DATA_CLEARANCE": "資料清表",
+            DocumentType.DATA_CLEARANCE.value: "資料清表",
             "MATERIAL_CLEARANCE": "用料清表",
+            DocumentType.MATERIAL_CLEARANCE.value: "用料清表",
             "DRAWBACK_CLEARANCE": "核退標準",
+            DocumentType.DRAWBACK_CLEARANCE.value: "核退標準",
             "arrival_notice": "到貨通知",
             "delivery_order": "D/O",
+            "manifest": "艙單",
             "shipping_order": "SO",
             "tax_sheet": "稅單",
             "clearance_list": "清表",
@@ -1667,7 +1764,10 @@ class CustomsErpWindow(QMainWindow):
         text = self._human_document_name(value)
         replacements = {
             "WARNING_GLOBAL_DECLARATION_IS_CORE": "報單為核心文件，請確認報單資料是否為正式版本",
+            "WARNING GLOBAL DECLARATION IS CORE": "報單為核心文件，請確認報單資料是否為正式版本",
             "COMPARE_COMMON_FIELDS": "共通欄位需人工確認",
+            "WARNING_GLOBAL_COMPARE_COMMON_FIELDS": "共通欄位需人工確認",
+            "WARNING GLOBAL COMPARE COMMON FIELDS": "共通欄位需人工確認",
             "declaration core": "報單核心資料",
             "workflow grouping": "案件分組",
             "parser": "文件讀取",
@@ -1676,7 +1776,8 @@ class CustomsErpWindow(QMainWindow):
         }
         for raw, label in replacements.items():
             text = text.replace(raw, label)
-        if "WARNING_" in text or "COMPARE_" in text:
+        normalized = text.replace(" ", "_")
+        if "WARNING_" in normalized or "COMPARE_" in normalized:
             return "文件需人工確認"
         if "traceback" in text.casefold():
             return "處理細節已寫入 logs/runtime.log"
@@ -1910,8 +2011,9 @@ class CustomsErpWindow(QMainWindow):
                     fallback_rows.append([self._human_document_name(missing), *["未提供" for _ in columns], "✗ 待補件"])
             for document_type, names in case.fallback_document_candidates.items():
                 values = ["-" for _ in columns]
+                evidence_key = self._source_to_evidence_key(document_type)
                 for index, (key, _label) in enumerate(columns):
-                    if key == document_type:
+                    if key == evidence_key:
                         values[index] = "；".join(names[:3])
                 fallback_rows.append([self._human_document_name(document_type), *values, "⚠ 已收到疑似文件，待人工確認"])
             if case.rule_findings:
@@ -2003,6 +2105,7 @@ class CustomsErpWindow(QMainWindow):
             DocumentType.BILL_OF_LADING,
             DocumentType.ARRIVAL_NOTICE,
             DocumentType.DELIVERY_ORDER,
+            DocumentType.MANIFEST,
             DocumentType.DS2_DECLARATION,
             DocumentType.EXPORT_DECLARATION,
             DocumentType.TAX_SHEET,
@@ -2047,6 +2150,7 @@ class CustomsErpWindow(QMainWindow):
             DocumentType.BILL_OF_LADING: "bl",
             DocumentType.ARRIVAL_NOTICE: "arrival_notice",
             DocumentType.DELIVERY_ORDER: "delivery_order",
+            DocumentType.MANIFEST: "manifest",
             DocumentType.SHIPPING_ORDER: "shipping_order",
             DocumentType.BOOKING: "booking",
             DocumentType.BOOKING_CONFIRMATION: "booking",
@@ -2070,6 +2174,8 @@ class CustomsErpWindow(QMainWindow):
             return "arrival_notice"
         if "d/o" in text or "delivery order" in text or "提貨" in text:
             return "delivery_order"
+        if "manifest" in text or "艙單" in text or "倉單" in text:
+            return "manifest"
         if "s/o" in text or "shipping order" in text:
             return "shipping_order"
         if "booking" in text or "訂艙" in text:
@@ -2393,7 +2499,7 @@ class CustomsErpWindow(QMainWindow):
             self,
             "選擇核對文件",
             "",
-            "Documents (*.pdf *.txt *.csv *.tsv);;All Files (*.*)",
+            "報關文件 (*.pdf *.txt *.csv *.tsv);;所有檔案 (*.*)",
         )
         if paths:
             self._add_documents(paths, upload_list, upload_hint, parser_debug)
@@ -2870,7 +2976,7 @@ class CustomsErpWindow(QMainWindow):
             QMainWindow, QWidget {
                 background: #0F1318;
                 color: #E7EDF3;
-                font-family: "Microsoft JhengHei UI", "Segoe UI";
+                font-family: "Noto Sans TC", "Microsoft JhengHei UI", "Microsoft JhengHei", "PMingLiU", "MingLiU", "Segoe UI";
                 font-size: 14px;
             }
             QMenuBar {
@@ -2888,8 +2994,8 @@ class CustomsErpWindow(QMainWindow):
                 color: #FFFFFF;
             }
             #Sidebar {
-                min-width: 268px;
-                max-width: 268px;
+                min-width: 240px;
+                max-width: 240px;
                 background: #121820;
                 border-right: 1px solid #25303B;
             }
@@ -3368,6 +3474,14 @@ class CustomsErpWindow(QMainWindow):
                 background: #EEF2F6;
                 border-radius: 8px;
             }
+            #DirectionBadge {
+                color: #14324A;
+                background: #E6F2F7;
+                border: 1px solid #B9D9E6;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-weight: 800;
+            }
             /* Final production ERP readability */
             QWidget {
                 font-size: 15px;
@@ -3382,8 +3496,8 @@ class CustomsErpWindow(QMainWindow):
                 padding: 2px 0;
             }
             #WorkflowUpload {
-                min-height: 108px;
-                max-height: 128px;
+                min-height: 96px;
+                max-height: 118px;
             }
             QListWidget#UploadList {
                 background: #F8FAFC;
@@ -3392,6 +3506,11 @@ class CustomsErpWindow(QMainWindow):
                 border-radius: 8px;
                 padding: 6px 10px;
                 font-size: 15px;
+            }
+            QListWidget#UploadList[dragActive="true"] {
+                background: #EFF6FF;
+                border: 2px solid #2563EB;
+                color: #14324A;
             }
             #AuditSplitter::handle {
                 background: #D8DEE6;
@@ -3402,10 +3521,22 @@ class CustomsErpWindow(QMainWindow):
                 border: 1px solid #D8DEE6;
                 border-radius: 8px;
             }
+            #AuditSidePanel {
+                min-width: 280px;
+            }
+            #AuditWorkspace {
+                min-width: 560px;
+            }
             #DocumentStatusBar {
                 background: #F8FAFC;
                 border: 1px solid #E2E8F0;
                 border-radius: 8px;
+            }
+            QListWidget#DocumentCards {
+                padding: 2px;
+                alternate-background-color: #FFFFFF;
+                selection-background-color: #E6F2F7;
+                selection-color: #0F172A;
             }
             #DocumentCards::item {
                 color: #1F2A37;
@@ -3436,9 +3567,21 @@ class CustomsErpWindow(QMainWindow):
                 color: #111827;
                 padding: 10px 12px;
             }
+            QTableWidget#CompareTable::item:alternate {
+                background: #F8FAFC;
+                color: #111827;
+            }
             QTableWidget#CompareTable::item:selected {
                 background: #D8EBF2;
                 color: #111827;
+            }
+            QTableWidget#CompareTable::item:disabled {
+                background: #F1F5F9;
+                color: #64748B;
+            }
+            QLineEdit#CompareSearch {
+                min-width: 150px;
+                max-width: 240px;
             }
             QHeaderView::section {
                 background: #EDF2F7;
@@ -3455,6 +3598,10 @@ class CustomsErpWindow(QMainWindow):
                 font-size: 16px;
                 line-height: 1.55;
             }
+            QTextEdit#AuditReportView:disabled {
+                color: #475569;
+                background: #F8FAFC;
+            }
             QTextEdit#RiskSummaryCard {
                 color: #4A3410;
                 background: #FFF7E6;
@@ -3463,6 +3610,13 @@ class CustomsErpWindow(QMainWindow):
                 padding: 14px 16px;
                 font-size: 15px;
                 line-height: 1.5;
+            }
+            QTextEdit#RiskSummaryCard:disabled {
+                color: #6B4E16;
+                background: #FFF7E6;
+            }
+            QAbstractScrollArea {
+                background: #FFFFFF;
             }
             QScrollBar:horizontal {
                 height: 0;

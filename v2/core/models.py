@@ -12,6 +12,7 @@ class DocumentType(str, Enum):
     BILL_OF_LADING = "B/L"
     ARRIVAL_NOTICE = "到貨通知"
     DELIVERY_ORDER = "D/O"
+    MANIFEST = "艙單"
     CLEARANCE_LIST = "清表"
     DATA_CLEARANCE = "資料清表"
     MATERIAL_CLEARANCE = "用料清表"
@@ -67,6 +68,13 @@ class CanonicalField(str, Enum):
     EXCHANGE_RATE = "exchange_rate"
     STATISTICAL_METHOD = "statistical_method"
     DUTY_AMOUNT = "duty_amount"
+    CUSTOMS_VALUE = "customs_value"
+    TRADE_PROMOTION_FEE = "trade_promotion_fee"
+    BUSINESS_TAX = "business_tax"
+    IMPORT_REGULATION = "import_regulation"
+    MP1 = "mp1"
+    BSMI = "bsmi"
+    COMMODITY_INSPECTION = "commodity_inspection"
     CLOSING_DATE = "closing_date"
 
 

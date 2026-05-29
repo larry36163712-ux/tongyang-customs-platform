@@ -25,6 +25,7 @@ KEY_WEIGHTS = {
     "bl_no": 0.95,
     "invoice_no": 0.9,
     "container_no": 0.9,
+    "container_suffix": 0.72,
     "vessel_voyage": 0.7,
     "amount": 0.55,
     "date": 0.45,
@@ -119,6 +120,12 @@ class WorkflowMatcher:
             "vessel_voyage": self._first_match(normalized_text, r"\b(?:vessel\s*/\s*voyage|vessel voyage|vsl\s*/?\s*voy)\s*[:\-]?\s*([A-Z0-9 .\-\/]+)"),
             "date": self._first_match(normalized_text, r"\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b"),
         }
+        text_vessel = self._vessel_voyage_from_text(normalized_text)
+        if text_vessel and (not keys.get("vessel_voyage") or self._is_generic_vessel_value(keys["vessel_voyage"])):
+            keys["vessel_voyage"] = text_vessel
+        if not keys.get("container_no"):
+            keys["container_no"] = self._container_from_text(normalized_text)
+        keys["container_suffix"] = self._container_suffix(keys.get("container_no", "")) or self._container_suffix_from_text(normalized_text)
         if document:
             keys["consignee"] = self._field(document, CanonicalField.CUSTOMER)
             keys["shipper"] = self._field(document, CanonicalField.SUPPLIER)
@@ -127,8 +134,12 @@ class WorkflowMatcher:
             keys["bl_no"] = keys.get("bl_no") or self._field(document, CanonicalField.BL_NO)
             keys["booking_no"] = keys.get("booking_no") or self._field(document, CanonicalField.BOOKING_NO)
             keys["shipping_order_no"] = keys.get("shipping_order_no") or self._field(document, CanonicalField.SHIPPING_ORDER_NO)
-            keys["vessel_voyage"] = keys.get("vessel_voyage") or self._field(document, CanonicalField.VESSEL_VOYAGE)
-        return {key: _normalize_key(key, value) for key, value in keys.items() if value}
+            parsed_vessel = self._field(document, CanonicalField.VESSEL_VOYAGE) or self._field(document, CanonicalField.VOYAGE)
+            keys["vessel_voyage"] = keys.get("vessel_voyage") or parsed_vessel
+            keys["container_no"] = keys.get("container_no") or self._field(document, CanonicalField.CONTAINER_NO)
+            keys["container_suffix"] = keys.get("container_suffix") or self._container_suffix(keys.get("container_no", ""))
+        normalized = {key: _normalize_key(key, value) for key, value in keys.items() if value}
+        return {key: value for key, value in normalized.items() if self._valid_match_key(key, value)}
 
     def _bucket_key(self, keys: dict[str, str], segment: DocumentSegment) -> str:
         for key in ("booking_no", "shipping_order_no", "bl_no", "container_no", "vessel_voyage", "invoice_no"):
@@ -144,6 +155,10 @@ class WorkflowMatcher:
         right_segment: DocumentSegment,
     ) -> MatchDecision:
         reasons: list[str] = []
+        if self._source_context_conflict(left_segment, right_segment):
+            return MatchDecision(score=0.0, confidence="pending_review", reasons=["source anti-mix guard"])
+        if self._anti_mix_conflict(left, right):
+            return MatchDecision(score=0.0, confidence="pending_review", reasons=["anti-mix guard"])
         score = 0.0
         for key, weight in KEY_WEIGHTS.items():
             left_value = left.get(key, "")
@@ -157,7 +172,7 @@ class WorkflowMatcher:
             elif similarity >= 0.88:
                 reasons.append(f"{key}: OCR-normalized")
                 score = max(score, weight * 0.92)
-            elif similarity >= 0.72 and key in {"invoice_no", "bl_no", "booking_no", "shipping_order_no", "container_no"}:
+            elif similarity >= 0.72 and key in {"invoice_no", "bl_no", "booking_no", "shipping_order_no", "container_no", "container_suffix"}:
                 reasons.append(f"{key}: partial")
                 score = max(score, weight * 0.72)
 
@@ -165,12 +180,81 @@ class WorkflowMatcher:
             score = max(score, 0.68)
             reasons.append("same source file")
 
-        if score < 0.6 and self._complementary_customs_documents(left_segment, right_segment):
+        if score < 0.6 and self._bridge_context_match(left, right, left_segment, right_segment):
+            score = max(score, 0.64)
+            reasons.append("shipment bridge candidate")
+
+        if (
+            score < 0.6
+            and self._complementary_customs_documents(left_segment, right_segment)
+            and (self._has_soft_context_overlap(left, right) or self._lacks_conflicting_context(left, right))
+        ):
             score = max(score, 0.62)
             reasons.append("customs document set candidate")
 
         confidence = self._confidence_label(score, 2)
         return MatchDecision(score=score, confidence=confidence, reasons=self._dedupe(reasons))
+
+    def _anti_mix_conflict(self, left: dict[str, str], right: dict[str, str]) -> bool:
+        hard_keys = ("invoice_no", "bl_no", "booking_no", "shipping_order_no", "container_no")
+        for key in hard_keys:
+            left_value = left.get(key, "")
+            right_value = right.get(key, "")
+            if left_value and right_value and _key_similarity(left_value, right_value) < 0.72:
+                return True
+        for key in ("consignee", "shipper"):
+            left_value = left.get(key, "")
+            right_value = right.get(key, "")
+            if left_value and right_value and _key_similarity(left_value, right_value) < 0.58:
+                return True
+        return False
+
+    def _bridge_context_match(
+        self,
+        left: dict[str, str],
+        right: dict[str, str],
+        left_segment: DocumentSegment,
+        right_segment: DocumentSegment,
+    ) -> bool:
+        left_type = self._effective_document_type(left_segment)
+        right_type = self._effective_document_type(right_segment)
+        bridge_types = {DocumentType.BILL_OF_LADING, DocumentType.ARRIVAL_NOTICE, DocumentType.DELIVERY_ORDER, DocumentType.MANIFEST}
+        core_types = {DocumentType.INVOICE, DocumentType.PACKING_LIST, DocumentType.DS2_DECLARATION, DocumentType.EXPORT_DECLARATION}
+        if not ((left_type in bridge_types and right_type in core_types) or (right_type in bridge_types and left_type in core_types)):
+            return False
+        container_overlap = self._context_similarity(left, right, "container_no", 0.72) or self._context_similarity(left, right, "container_suffix", 0.92)
+        vessel_overlap = self._context_similarity(left, right, "vessel_voyage", 0.78)
+        party_overlap = self._context_similarity(left, right, "consignee", 0.62) or self._context_similarity(left, right, "shipper", 0.62)
+        reference_overlap = any(self._context_similarity(left, right, key, 0.72) for key in ("booking_no", "bl_no", "invoice_no"))
+        return bool(reference_overlap or container_overlap or (vessel_overlap and (container_overlap or party_overlap)))
+
+    def _context_similarity(self, left: dict[str, str], right: dict[str, str], key: str, threshold: float) -> bool:
+        left_value = left.get(key, "")
+        right_value = right.get(key, "")
+        return bool(left_value and right_value and _key_similarity(left_value, right_value) >= threshold)
+
+    def _has_soft_context_overlap(self, left: dict[str, str], right: dict[str, str]) -> bool:
+        for key in ("consignee", "shipper", "vessel_voyage", "date"):
+            left_value = left.get(key, "")
+            right_value = right.get(key, "")
+            if left_value and right_value and _key_similarity(left_value, right_value) >= 0.72:
+                return True
+        return False
+
+    def _lacks_conflicting_context(self, left: dict[str, str], right: dict[str, str]) -> bool:
+        context_keys = (
+            "invoice_no",
+            "bl_no",
+            "booking_no",
+            "shipping_order_no",
+            "container_no",
+            "container_suffix",
+            "consignee",
+            "shipper",
+            "vessel_voyage",
+            "date",
+        )
+        return not any(left.get(key) and right.get(key) for key in context_keys)
 
     def _confidence_label(self, score: float, document_count: int) -> str:
         if document_count <= 1 and score <= 0:
@@ -266,6 +350,7 @@ class WorkflowMatcher:
             DocumentType.INVOICE,
             DocumentType.PACKING_LIST,
             DocumentType.BILL_OF_LADING,
+            DocumentType.MANIFEST,
             DocumentType.DS2_DECLARATION,
             DocumentType.EXPORT_DECLARATION,
             DocumentType.BOOKING,
@@ -283,9 +368,88 @@ class WorkflowMatcher:
     def _first_match(self, text: str, pattern: str) -> str:
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
             value = match.group(1).strip()
-            if value.upper() not in {"INV", "INVOICE", "NO", "NUMBER", "BL", "B/L"}:
+            if value.upper() not in {"INV", "INVOICE", "NO", "NUMBER", "BL", "B/L", "CONFIRMATION", "SHIPPING", "ORDER"}:
                 return value
         return ""
+
+    def _valid_match_key(self, key: str, value: str) -> bool:
+        if not value:
+            return False
+        generic = {"TO", "NG", "L", "LID", "SHIPPER", "CONSIGNEE", "NOTIFY", "ADDRESS", "PRECARRYING", "ONCARRYING"}
+        if value in generic:
+            return False
+        if key in {"invoice_no", "bl_no", "booking_no", "shipping_order_no"}:
+            return len(value) >= 4 and not value.isalpha()
+        if key == "container_no":
+            return len(value) >= 8 and bool(re.search(r"[0-9]", value))
+        if key == "container_suffix":
+            return len(value) >= 6 and value.isdigit()
+        if key == "vessel_voyage":
+            return len(value) >= 6 and not self._is_generic_vessel_value(value)
+        if key == "amount":
+            return any(char.isdigit() for char in value)
+        return True
+
+    def _source_context_conflict(self, left: DocumentSegment, right: DocumentSegment) -> bool:
+        if left.source_path == right.source_path:
+            return False
+        left_hint = self._source_customer_hint(left)
+        right_hint = self._source_customer_hint(right)
+        return bool(left_hint and right_hint and left_hint != right_hint)
+
+    def _source_customer_hint(self, segment: DocumentSegment) -> str:
+        stem = segment.source_path.stem
+        stem = re.sub(r"^\d+[_\-\s]*", "", stem)
+        stem = re.sub(
+            r"(DS2|INV|IV|PKG|PL|B_L|BL|B/L|報單|發票|包裝單|裝箱單|提單|艙單|倉單|到貨|D[/-]?O|SO|BOOKING|PDF|\d+)",
+            "",
+            stem,
+            flags=re.IGNORECASE,
+        )
+        cjk = "".join(re.findall(r"[\u4e00-\u9fff]+", stem))
+        return cjk if len(cjk) >= 2 else ""
+
+    def _is_generic_vessel_value(self, value: str) -> bool:
+        normalized = _normalize_key("vessel_voyage", value)
+        return normalized in {"PRECARRYING", "ONCARRYING", "VESSEL", "VOYAGE"}
+
+    def _vessel_voyage_from_text(self, text: str) -> str:
+        match = re.search(r"\b(?:WAN\s+)?HAI\s+([0-9A-Z]{2,4})\s+([A-Z0-9]{2,5})\b", text, flags=re.IGNORECASE)
+        if match:
+            voyage = _repair_ocr_identifier(match.group(2).upper())
+            return f"WAN HAI {match.group(1)} {voyage}"
+        return ""
+
+    def _container_from_text(self, text: str) -> str:
+        patterns = (
+            r"\b([A-Z]{4})\s*([0-9?OILSG]{2,4})\s*([0-9?OILSG]{2,4})\b",
+            r"\b([A-Z]{2,4}SU)\s*([0-9?OILSG]{2,5})\s*([0-9?OILSG]{2,5})\b",
+        )
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                owner = match.group(1).upper()
+                number = self._repair_container_digits(match.group(2) + match.group(3))
+                if len(number) >= 7:
+                    return f"{owner}{number[-7:]}"
+        return ""
+
+    def _container_suffix_from_text(self, text: str) -> str:
+        container = self._container_from_text(text)
+        if container:
+            return self._container_suffix(container)
+        for match in re.finditer(r"(?:CONTAINER|CONT|SEAL|SEA-L)[^A-Z0-9]{0,8}([0-9?OILSG]{6,8})", text, flags=re.IGNORECASE):
+            suffix = self._repair_container_digits(match.group(1))
+            if len(suffix) >= 6:
+                return suffix[-7:]
+        return ""
+
+    def _container_suffix(self, value: str) -> str:
+        digits = "".join(char for char in _repair_ocr_identifier(value) if char.isdigit())
+        return digits[-7:] if len(digits) >= 7 else ""
+
+    def _repair_container_digits(self, value: str) -> str:
+        table = str.maketrans({"?": "7", "O": "0", "I": "1", "L": "1", "S": "5", "G": "8"})
+        return re.sub(r"[^0-9]", "", value.upper().translate(table))
 
     def _dedupe(self, values: list[str]) -> list[str]:
         seen: set[str] = set()
@@ -316,10 +480,10 @@ def _normalize_ocr_text(text: str) -> str:
 def _normalize_key(key: str, value: str) -> str:
     value = _normalize_ocr_text(value)
     value = re.sub(r"[^A-Z0-9/\-.]", "", value)
-    if key in {"invoice_no", "bl_no", "booking_no", "shipping_order_no", "container_no"}:
+    if key in {"invoice_no", "bl_no", "booking_no", "shipping_order_no", "container_no", "container_suffix"}:
         value = _repair_ocr_identifier(value)
     if key == "vessel_voyage":
-        value = _normalize_vessel_alias(value)
+        value = _normalize_vessel_alias(_repair_ocr_identifier(value))
     return value
 
 

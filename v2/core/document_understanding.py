@@ -126,6 +126,16 @@ class SemanticDocumentClassifier:
             identifier_patterns=(r"\b(?:b/l|bl)\s*(?:no|number|#)\b", r"\bno\s+of\s+original\s+b/l\b", r"\bbill\s+of\s+lading\b", r"\b[A-Z]{4}\s*\d{7}\b", r"提單號碼|託運人|受貨人"),
         ),
         DocumentSemanticProfile(
+            DocumentType.MANIFEST,
+            layout_terms=("manifest", "cargo manifest", "艙單", "倉單", "進口艙單", "海運艙單"),
+            semantic_fields=("manifest no", "manifest number", "艙單號碼", "艙單號", "倉單號碼", "船名", "航次", "卸貨港", "裝貨港"),
+            table_patterns=("marks", "quantity", "description of goods", "weight", "measurement", "container", "seal", "件數", "貨名", "重量", "材積"),
+            shipping_terms=("vessel", "voyage", "port of loading", "port of discharge", "eta", "船名", "航次", "到港日"),
+            trade_fingerprint=("cargo manifest", "manifest no", "艙單號碼", "船呼", "海掛"),
+            identifier_patterns=(r"\b(?:cargo\s+)?manifest\s*(?:no|number|#)?\b", r"艙單號碼|艙單號|進口艙單|海運艙單|倉單號碼"),
+            minimum_score=0.36,
+        ),
+        DocumentSemanticProfile(
             DocumentType.ARRIVAL_NOTICE,
             layout_terms=("arrival notice", "notice of arrival", "到貨通知", "抵港通知"),
             semantic_fields=("notice no", "arrival date", "free time", "delivery order", "d/o no", "pickup location", "eta", "到港日", "免費倉期", "貨櫃場", "費用明細"),
@@ -202,6 +212,8 @@ class SemanticDocumentClassifier:
         for profile in self.PROFILES:
             breakdown = self._score_profile(profile, structure, filename)
             confidence = round(min(0.98, max(0.0, sum(breakdown.values()))), 2)
+            if profile.document_type == DocumentType.DS2_DECLARATION:
+                confidence = self._cap_ds2_sparse_confidence(structure, confidence)
             if confidence >= profile.minimum_score:
                 candidates.append(
                     DocumentCandidate(
@@ -212,6 +224,8 @@ class SemanticDocumentClassifier:
                         {key: round(value, 2) for key, value in breakdown.items() if abs(value) > 0.001},
                     )
                 )
+
+        candidates = self._apply_boundary_rules(candidates, structure)
 
         if not candidates and text.strip():
             candidates.append(
@@ -224,6 +238,113 @@ class SemanticDocumentClassifier:
                 )
             )
         return sorted(candidates, key=lambda candidate: candidate.confidence, reverse=True)
+
+    def _apply_boundary_rules(
+        self,
+        candidates: list[DocumentCandidate],
+        structure: OCRStructure,
+    ) -> list[DocumentCandidate]:
+        by_type = {candidate.document_type: candidate for candidate in candidates}
+        normalized = structure.normalized
+        header = structure.header
+
+        packing = by_type.get(DocumentType.PACKING_LIST)
+        bl = by_type.get(DocumentType.BILL_OF_LADING)
+        if packing and ("packing list" in header or "packing list" in normalized):
+            self._adjust_candidate(packing, 0.14, "PACKING LIST 表頭")
+            if bl and not self._has_strong_bl_identity(normalized):
+                self._adjust_candidate(bl, -0.10, "B/L 強特徵不足，避免 PL 誤判 B/L")
+
+        arrival = by_type.get(DocumentType.ARRIVAL_NOTICE)
+        delivery = by_type.get(DocumentType.DELIVERY_ORDER)
+        manifest = by_type.get(DocumentType.MANIFEST)
+        if arrival and self._has_arrival_identity(normalized) and bl and not self._has_strong_bl_identity(normalized):
+            self._adjust_candidate(arrival, 0.12, "到貨通知強特徵")
+            self._adjust_candidate(bl, -0.08, "到貨通知與 B/L 邊界校正")
+        if delivery and self._has_delivery_identity(normalized) and not self._has_arrival_identity(normalized):
+            self._adjust_candidate(delivery, 0.28 if self._has_delivery_title(header) else 0.10, "D/O 強特徵")
+            if bl and not self._has_strong_bl_identity(normalized):
+                self._adjust_candidate(bl, -0.08, "D/O 與 B/L 邊界校正")
+            elif bl and self._has_delivery_title(header):
+                self._adjust_candidate(bl, -0.18, "D/O 表頭優先於 B/L 佐證文字")
+            if manifest:
+                self._adjust_candidate(manifest, -0.12 if self._has_delivery_title(header) else -0.08, "D/O 與艙單邊界校正")
+        if manifest and self._has_manifest_identity(normalized) and not self._has_strong_bl_title(header):
+            self._adjust_candidate(manifest, 0.10, "艙單強特徵")
+            if bl and not self._has_strong_bl_identity(normalized):
+                self._adjust_candidate(bl, -0.06, "艙單與 B/L 邊界校正")
+            elif bl:
+                self._adjust_candidate(bl, -0.12, "艙單號碼優先於 B/L 佐證文字")
+
+        return candidates
+
+    def _adjust_candidate(self, candidate: DocumentCandidate, delta: float, reason: str) -> None:
+        candidate.confidence = round(min(0.98, max(0.0, candidate.confidence + delta)), 2)
+        candidate.needs_manual_confirm = candidate.confidence < self.CONFIRMED_THRESHOLD
+        candidate.score_breakdown[f"boundary_rule:{reason}"] = round(delta, 2)
+        if reason not in candidate.reasons:
+            candidate.reasons.append(reason)
+
+    def _has_strong_bl_identity(self, text: str) -> bool:
+        strong_terms = (
+            "bill of lading",
+            "no of original b/l",
+            "no. of original b/l",
+            "original b/l",
+            "to the order",
+            "laden on board",
+            "shipped on board",
+        )
+        return any(term in text for term in strong_terms)
+
+    def _has_strong_bl_title(self, header: str) -> bool:
+        return "bill of lading" in header or "no of original b/l" in header or "original b/l" in header
+
+    def _has_arrival_identity(self, text: str) -> bool:
+        return "arrival notice" in text or "notice of arrival" in text or "free time" in text
+
+    def _has_delivery_identity(self, text: str) -> bool:
+        return "delivery order" in text or re.search(r"\bd/o\b", text) is not None or "cargo release" in text
+
+    def _has_delivery_title(self, header: str) -> bool:
+        return "delivery order" in header or "提貨單" in header or re.search(r"\bd/o\b", header) is not None
+
+    def _has_manifest_identity(self, text: str) -> bool:
+        return (
+            "cargo manifest" in text
+            or "manifest no" in text
+            or "manifest number" in text
+            or "艙單號碼" in text
+            or "艙單號" in text
+            or "進口艙單" in text
+            or "海運艙單" in text
+        )
+
+    def _cap_ds2_sparse_confidence(self, structure: OCRStructure, confidence: float) -> float:
+        identity_terms = ("進口報單", "海關進口報單", "報單號碼", "ds2", "import declaration")
+        has_identity = any(self._normalize(term) in structure.normalized for term in identity_terms)
+        field_terms = (
+            "稅則",
+            "統計方式",
+            "完稅價格",
+            "cif",
+            "fob",
+            "稅率",
+            "稅額",
+            "推貿費",
+            "船名航次",
+            "件數",
+            "毛重",
+            "淨重",
+            "進口人",
+            "納稅義務人",
+        )
+        field_hit_count = sum(1 for term in field_terms if self._normalize(term) in structure.normalized)
+        if has_identity:
+            return confidence
+        if field_hit_count >= 7:
+            return min(confidence, 0.76)
+        return min(confidence, 0.74)
 
     def best(self, text: str, filename: str = "") -> DocumentCandidate:
         candidates = self.classify(text, filename)
@@ -264,6 +385,9 @@ class SemanticDocumentClassifier:
             ds2_bonus = self._ds2_partial_bonus(structure, field_hits, customs_hits, table_hits, identifier_hits)
             if ds2_bonus:
                 breakdown["ds2_partial_structure"] = ds2_bonus
+            customs_group_score = self._ds2_customs_group_score(structure)
+            if customs_group_score:
+                breakdown["ds2_customs_groups"] = customs_group_score
         penalty = min(0.12, structure.noisy_ratio * 0.12)
         if penalty:
             breakdown["ocr_noise_penalty"] = -penalty
@@ -287,6 +411,27 @@ class SemanticDocumentClassifier:
             return 0.18
         return 0.0
 
+    def _ds2_customs_group_score(self, structure: OCRStructure) -> float:
+        groups = {
+            "declaration_identity": ("進口報單", "海關進口報單", "報單號碼", "報單", "ds2", "import declaration"),
+            "tax_value": ("稅則", "完稅價格", "cif", "fob", "稅率", "稅額", "推貿費"),
+            "declaration_body": ("統計方式", "船名航次", "件數", "毛重", "淨重", "納稅義務人", "進口人"),
+        }
+        group_hits = 0
+        term_hits = 0
+        for terms in groups.values():
+            hits = [term for term in terms if self._normalize(term) in structure.normalized]
+            if hits:
+                group_hits += 1
+                term_hits += len(hits)
+        if group_hits >= 3:
+            return 0.24
+        if group_hits >= 2:
+            return 0.20
+        if term_hits >= 2 and structure.numeric_ratio >= 0.08:
+            return 0.16
+        return 0.0
+
     def _filename_hints(self, document_type: DocumentType, filename: str) -> float:
         normalized = self._normalize(filename)
         if not normalized:
@@ -297,6 +442,7 @@ class SemanticDocumentClassifier:
             DocumentType.PACKING_LIST: ("packing", "pack", "pl", "pkg", "裝箱", "包裝"),
             DocumentType.ARRIVAL_NOTICE: ("arrival", "notice", "到貨", "抵港"),
             DocumentType.DELIVERY_ORDER: ("d/o", "delivery", "提貨", "小提單"),
+            DocumentType.MANIFEST: ("manifest", "艙單", "倉單"),
             DocumentType.BILL_OF_LADING: ("b/l", "bl", "提單"),
             DocumentType.SHIPPING_ORDER: ("so", "s/o", "shipping order"),
             DocumentType.BOOKING: ("booking", "訂艙"),
@@ -316,7 +462,7 @@ class SemanticDocumentClassifier:
             score += min(0.08, 0.025 * structure.money_count)
         if document_type == DocumentType.PACKING_LIST and structure.weight_count:
             score += min(0.10, 0.03 * structure.weight_count)
-        if document_type in {DocumentType.BILL_OF_LADING, DocumentType.BOOKING, DocumentType.SHIPPING_ORDER, DocumentType.ARRIVAL_NOTICE, DocumentType.DELIVERY_ORDER} and structure.container_count:
+        if document_type in {DocumentType.BILL_OF_LADING, DocumentType.BOOKING, DocumentType.SHIPPING_ORDER, DocumentType.ARRIVAL_NOTICE, DocumentType.DELIVERY_ORDER, DocumentType.MANIFEST} and structure.container_count:
             score += 0.06
         if document_type in {DocumentType.DS2_DECLARATION, DocumentType.EXPORT_DECLARATION, DocumentType.TAX_SHEET} and structure.numeric_ratio >= 0.12:
             score += 0.08

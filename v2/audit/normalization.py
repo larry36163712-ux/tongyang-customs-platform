@@ -44,6 +44,9 @@ class SemanticNormalizationEngine:
         CanonicalField.FREIGHT,
         CanonicalField.INSURANCE,
         CanonicalField.DUTY_AMOUNT,
+        CanonicalField.CUSTOMS_VALUE,
+        CanonicalField.TRADE_PROMOTION_FEE,
+        CanonicalField.BUSINESS_TAX,
     }
 
     def normalize(self, field: CanonicalField, value: str) -> NormalizedValue:

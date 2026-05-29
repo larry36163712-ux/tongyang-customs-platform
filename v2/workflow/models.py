@@ -72,6 +72,7 @@ class CaseWorkflow:
     grouping_score: float = 0.0
     grouping_reasons: list[str] = field(default_factory=list)
     unresolved_fields: list[str] = field(default_factory=list)
+    case_organizer: Any | None = None
 
 
 @dataclass

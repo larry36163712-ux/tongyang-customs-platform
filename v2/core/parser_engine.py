@@ -54,6 +54,13 @@ class SemanticParserEngine:
         SemanticAlias(CanonicalField.EXCHANGE_RATE, ("exchange rate", "ex rate", "rate", "匯率")),
         SemanticAlias(CanonicalField.STATISTICAL_METHOD, ("statistical method", "stat method", "統計方式", "統計單位")),
         SemanticAlias(CanonicalField.DUTY_AMOUNT, ("duty", "tax", "duty amount", "稅額", "進口稅")),
+        SemanticAlias(CanonicalField.CUSTOMS_VALUE, ("customs value", "dutiable value", "完稅價格", "完稅價值", "海關完稅價格")),
+        SemanticAlias(CanonicalField.TRADE_PROMOTION_FEE, ("trade promotion fee", "推貿費", "推廣貿易服務費")),
+        SemanticAlias(CanonicalField.BUSINESS_TAX, ("business tax", "vat", "營業稅", "加值稅")),
+        SemanticAlias(CanonicalField.IMPORT_REGULATION, ("import regulation", "import requirements", "輸入規定", "輸入規定代號")),
+        SemanticAlias(CanonicalField.MP1, ("mp1", "mp 1", "mp-1", "mp1 規定")),
+        SemanticAlias(CanonicalField.BSMI, ("bsmi", "商品檢驗", "標準檢驗局", "商檢局")),
+        SemanticAlias(CanonicalField.COMMODITY_INSPECTION, ("commodity inspection", "inspection", "商檢", "檢驗方式", "商品檢驗")),
         SemanticAlias(CanonicalField.CLOSING_DATE, ("closing date", "cut off", "cutoff", "結關日")),
     )
 
@@ -64,6 +71,8 @@ class SemanticParserEngine:
         (DocumentType.PACKING_LIST, ("packing list", "pkg", "p/l")),
         (DocumentType.INVOICE, ("commercial invoice", "invoice")),
         (DocumentType.ARRIVAL_NOTICE, ("arrival notice", "到貨通知")),
+        (DocumentType.DELIVERY_ORDER, ("delivery order", "d/o", "提貨單", "小提單")),
+        (DocumentType.MANIFEST, ("cargo manifest", "manifest no", "艙單號碼", "艙單", "倉單")),
         (DocumentType.CLEARANCE_LIST, ("清表",)),
         (DocumentType.DATA_CLEARANCE, ("資料清表",)),
         (DocumentType.MATERIAL_CLEARANCE, ("用料清表",)),
@@ -76,8 +85,10 @@ class SemanticParserEngine:
         (DocumentType.PACKING_DETAIL, ("packing detail", "container loading list", "裝箱明細")),
     )
 
-    def classify_document(self, text: str) -> DocumentType:
-        semantic = SemanticDocumentClassifier().best(text)
+    def classify_document(self, text: str, source_name: str = "") -> DocumentType:
+        semantic = SemanticDocumentClassifier().best(text, source_name)
+        if self._accept_ds2_candidate(text, semantic):
+            return DocumentType.DS2_DECLARATION
         if semantic.document_type != DocumentType.UNKNOWN and semantic.confidence >= 0.42:
             return semantic.document_type
         normalized = text.casefold()
@@ -100,6 +111,27 @@ class SemanticParserEngine:
             return DocumentType.UNKNOWN
         return max(scores, key=lambda item: item[0])[1]
 
+    def _accept_ds2_candidate(self, text: str, semantic) -> bool:
+        if semantic.document_type != DocumentType.DS2_DECLARATION or semantic.confidence < 0.30:
+            return False
+        normalized = text.casefold()
+        customs_terms = (
+            "外貨進口",
+            "進口",
+            "離岸價格",
+            "完稅價格",
+            "統計方式",
+            "稅率",
+            "稅額",
+            "推貿費",
+            "營業稅",
+            "fob",
+            "cif",
+        )
+        hits = sum(1 for term in customs_terms if term.casefold() in normalized)
+        has_tariff = bool(re.search(r"\b\d{4}\.\d{2}(?:\.\d{2})?(?:\.\d{2})?\b", normalized))
+        return hits >= 3 or (hits >= 2 and has_tariff)
+
     def map_label(self, label: str) -> CanonicalField | None:
         normalized = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", label).strip().casefold()
         for alias in self.FIELD_ALIASES:
@@ -108,7 +140,7 @@ class SemanticParserEngine:
         return None
 
     def parse_document(self, text: str, customer: str = "", supplier: str = "", source_name: str = "") -> ParsedDocument:
-        document_type = self.classify_document(text)
+        document_type = self.classify_document(text, source_name)
         fields: list[ParsedField] = []
         for line in text.splitlines():
             parsed = self._parse_line(line)

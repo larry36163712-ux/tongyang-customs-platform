@@ -40,6 +40,49 @@ def _run_runtime_self_test(output_path: str) -> int:
     except Exception as exc:
         ok = False
         results["ocr"] = {"available": False, "message": f"{type(exc).__name__}: {exc}"}
+    try:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+
+        from v2.ui.fonts import install_cjk_font
+
+        app = QApplication.instance() or QApplication([])
+        font_result = install_cjk_font(app)
+        sample = QWidget()
+        layout = QVBoxLayout(sample)
+        sample_texts = [
+            "通洋報關平台",
+            "案件工作流",
+            "進口核對",
+            "出口核對",
+            "文件匯入",
+            "核對摘要",
+            "異常摘要",
+            "高風險提示",
+        ]
+        for text in sample_texts:
+            layout.addWidget(QLabel(text))
+        sample.setStyleSheet(
+            'QWidget { background: #ffffff; color: #111111; '
+            'font-family: "Noto Sans TC", "Microsoft JhengHei UI", "Microsoft JhengHei", '
+            '"PMingLiU", "MingLiU", "Segoe UI"; font-size: 28px; }'
+        )
+        sample.resize(520, 360)
+        sample.show()
+        app.processEvents()
+        font_sample_path = str(Path(output_path).with_name("runtime-font-sample.png"))
+        sample.grab().save(font_sample_path)
+        results["font"] = {
+            "ok": True,
+            "family": font_result.family,
+            "source": font_result.source,
+            "loaded_files": list(font_result.loaded_files),
+            "sample_png": font_sample_path,
+            "sample_texts": sample_texts,
+        }
+    except Exception as exc:
+        ok = False
+        results["font"] = {"ok": False, "message": f"{type(exc).__name__}: {exc}"}
     Path(output_path).write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0 if ok else 2
 
@@ -88,6 +131,12 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("通洋報關平台")
     app.setOrganizationName("Tong Yang")
+    try:
+        from v2.ui.fonts import install_cjk_font
+
+        install_cjk_font(app)
+    except Exception as exc:
+        log_exception("qt cjk font bootstrap failed", exc)
 
     try:
         from v2.ui.main_window import CustomsErpWindow
