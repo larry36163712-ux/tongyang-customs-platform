@@ -172,7 +172,13 @@ function Assert-ReleaseAssets {
         throw "$OfficialExeName is missing browser_download_url."
     }
 
-    $manifest = Invoke-RestMethod -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"}
+    $manifestResponse = Invoke-WebRequest -Method Get -Uri $manifestAsset.browser_download_url -Headers @{"User-Agent" = "TongYangReleaseManager"} -UseBasicParsing
+    $manifestText = if ($manifestResponse.Content -is [byte[]]) {
+        [Text.Encoding]::UTF8.GetString($manifestResponse.Content)
+    } else {
+        [string]$manifestResponse.Content
+    }
+    $manifest = $manifestText | ConvertFrom-Json
     $expectedLatestExeUrl = if ($Channel -eq "stable") {
         "https://github.com/$Repo/releases/latest/download/$OfficialExeName"
     } else {
