@@ -138,6 +138,7 @@ def _grant_runtime_permissions(root: Path) -> list[dict[str, str]]:
                 capture_output=True,
                 text=True,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                timeout=20,
                 check=False,
             )
             rows.append(
@@ -208,6 +209,7 @@ $rows | ConvertTo-Json -Depth 4 -Compress
         env=env,
         capture_output=True,
         text=True,
+        timeout=20,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         check=True,
     )
