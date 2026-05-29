@@ -69,10 +69,8 @@ def _payload_path(name: str) -> Path:
 
 def _copy_payload(root: Path) -> dict[str, str]:
     root.mkdir(parents=True, exist_ok=True)
-    (root / "logs").mkdir(exist_ok=True)
-    (root / "cache").mkdir(exist_ok=True)
-    (root / "config").mkdir(exist_ok=True)
-    (root / "runtime").mkdir(exist_ok=True)
+    for dirname in ("logs", "cache", "config", "runtime", "parser_cache", "uploads", "exports", "database"):
+        (root / dirname).mkdir(exist_ok=True)
 
     app_exe = _payload_path(APP_EXE_NAME)
     target_exe = root / APP_EXE_NAME
@@ -124,7 +122,8 @@ def _grant_runtime_permissions(root: Path) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     # Builtin Users SID avoids localized group-name issues on Chinese Windows.
     users_sid = "*S-1-5-32-545"
-    for path in (root / "logs", root / "cache", root / "config", root / "runtime"):
+    writable_dirs = ("logs", "cache", "config", "runtime", "parser_cache", "uploads", "exports", "database")
+    for path in (root / dirname for dirname in writable_dirs):
         try:
             path.mkdir(parents=True, exist_ok=True)
             completed = subprocess.run(
