@@ -1,13 +1,17 @@
 {
   "app_name": "通洋報關平台",
-  "version": "1.1.2-dev",
+  "version": "1.1.10-rc.3",
   "channel": "dev",
-  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/TongYangCustomsPlatform.exe",
-  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.2-dev/TongYangCustomsPlatform.exe",
-  "sha256": "796f28e33b7684cd7a14745815c431bb7d170abd4f2a646d2ad47c0b26f6cb99",
-  "build_id": "1.1.2-dev-796f28e33b76",
-  "build_time": "2026-05-26T03:53:22+00:00",
-  "release_notes": "DEV release v1.1.2-dev",
-  "notes": "DEV release v1.1.2-dev",
-  "minimum_supported_version": "1.1.2-dev"
+  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.3/TongYangCustomsPlatform_Setup.exe",
+  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.3/TongYangCustomsPlatform_Setup.exe",
+  "sha256": "ad42bc738222ce89164cfe45e668e82449df2cd3239af6dac4ea15aac715da2e",
+  "app_sha256": "ad42bc738222ce89164cfe45e668e82449df2cd3239af6dac4ea15aac715da2e",
+  "build_id": "1.1.10-rc.3-ad42bc738222",
+  "build_time": "2026-05-29T10:54:06+00:00",
+  "release_id": "v1.1.10-rc.3",
+  "release_notes": "Internal RC v1.1.10-rc.3 for TongYang internal testing.",
+  "notes": "Internal RC v1.1.10-rc.3 for TongYang internal testing.",
+  "minimum_supported_version": "1.1.9",
+  "package_type": "installer",
+  "package_sha256": "06340d29f913e28a6c112ef0f04dd59701a6d728c4eedb8d65d259dcb358034b"
 }
