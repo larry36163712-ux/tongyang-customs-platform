@@ -546,6 +546,13 @@ class V2Updater:
             raise RuntimeError("目前不是 EXE 執行狀態，略過自動安裝")
 
         script_path = Path(tempfile.gettempdir()) / "TongYangCustomsPlatform_setup_update.bat"
+        if self._requires_installer_update():
+            install_command = (
+                'powershell -NoProfile -ExecutionPolicy Bypass -Command '
+                '"Start-Process -FilePath $env:SETUP -ArgumentList \'--silent-update\' -Verb RunAs -Wait"'
+            )
+        else:
+            install_command = '"%SETUP%" --silent-update'
         script = f"""@echo off
 setlocal EnableExtensions
 set "SETUP={setup_exe}"
@@ -559,7 +566,7 @@ for /l %%i in (1,1,60) do (
 )
 taskkill /PID %OLD_PID% /F >> "%LOG%" 2>&1
 :old_process_exited
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath $env:SETUP -ArgumentList '--silent-update' -Verb RunAs -Wait" >> "%LOG%" 2>&1
+{install_command} >> "%LOG%" 2>&1
 if errorlevel 1 (
   echo [%date% %time%] setup update failed >> "%LOG%"
   exit /b 1

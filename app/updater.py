@@ -184,6 +184,13 @@ def _schedule_installer(setup_exe: Path) -> None:
         raise RuntimeError("目前不是 EXE 執行狀態，略過安裝更新")
 
     script_path = Path(tempfile.gettempdir()) / "TongYangCustoms_setup_update.bat"
+    if _is_program_files_path(Path(sys.executable).resolve()):
+        install_command = (
+            'powershell -NoProfile -ExecutionPolicy Bypass -Command '
+            '"Start-Process -FilePath $env:SETUP -ArgumentList \'--silent-update\' -Verb RunAs -Wait"'
+        )
+    else:
+        install_command = '"%SETUP%" --silent-update'
     script = f"""@echo off
 setlocal EnableExtensions
 set "SETUP={setup_exe}"
@@ -196,7 +203,7 @@ for /l %%i in (1,1,60) do (
 )
 taskkill /PID %OLD_PID% /F > nul 2>&1
 :old_process_exited
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath $env:SETUP -ArgumentList '--silent-update' -Verb RunAs -Wait"
+{install_command}
 if errorlevel 1 exit /b 1
 del /f /q "%SETUP%" > nul 2>&1
 exit /b 0

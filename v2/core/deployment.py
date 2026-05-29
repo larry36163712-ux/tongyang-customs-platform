@@ -32,13 +32,21 @@ DESKTOP_ARTIFACT_NAMES = (
 
 
 def production_root() -> Path:
-    program_files = os.environ.get("ProgramFiles")
-    if program_files:
-        return Path(program_files) / APP_DIR_NAME
+    if os.environ.get("TY_INSTALL_SCOPE", "").strip().lower() in {"machine", "programfiles", "program_files"}:
+        program_files = os.environ.get("ProgramFiles")
+        if program_files:
+            return Path(program_files) / APP_DIR_NAME
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         return Path(local_app_data) / APP_DIR_NAME
     return Path.home() / "AppData" / "Local" / APP_DIR_NAME
+
+
+def legacy_program_files_root() -> Path | None:
+    program_files = os.environ.get("ProgramFiles")
+    if not program_files:
+        return None
+    return Path(program_files) / APP_DIR_NAME
 
 
 def production_exe_path() -> Path:
@@ -90,10 +98,13 @@ def is_running_from_production_dir() -> bool:
 def ensure_runtime_layout(relaunch: bool = True) -> dict[str, object]:
     """Install the frozen EXE into the single production runtime directory.
 
-    In production, every shortcut and updater operation should point to
-    Program Files/TongYangCustomsPlatform/TongYangCustomsPlatform.exe. If the
-    user launches a copied EXE from Downloads, Desktop, or dist, we attempt to
-    copy that EXE into the production directory and relaunch the production copy.
+    In production, every shortcut and updater operation should point to the
+    per-user runtime directory by default:
+    %LOCALAPPDATA%/TongYangCustomsPlatform/TongYangCustomsPlatform.exe. If the
+    user launches a copied EXE from Downloads, Desktop, dist, or an older
+    Program Files installation, we copy that EXE into the per-user directory and
+    relaunch the production copy. Machine-wide Program Files mode is retained as
+    an explicit opt-in via TY_INSTALL_SCOPE=machine.
     """
 
     state: dict[str, object] = {
@@ -140,7 +151,9 @@ def ensure_runtime_layout(relaunch: bool = True) -> dict[str, object]:
         try:
             _copy_if_changed(current, target)
             _copy_runtime_manifest(current.parent, root)
+            migration_state = migrate_legacy_program_files_data(root)
             state["installed"] = True
+            state["migration"] = migration_state
             state["cleanup_removed"] = cleanup_update_artifacts(root)
             shortcut_state = ensure_shortcuts(target)
             state["shortcut_target"] = str(target)
@@ -156,10 +169,66 @@ def ensure_runtime_layout(relaunch: bool = True) -> dict[str, object]:
             return state
 
     state["cleanup_removed"] = cleanup_update_artifacts(root)
+    state["migration"] = migrate_legacy_program_files_data(root)
     shortcut_state = ensure_shortcuts(target)
     state["shortcut_target"] = str(target)
     state["shortcuts"] = shortcut_state
     state["desktop_cleanup_removed"] = cleanup_desktop_artifacts(target)
+    return state
+
+
+def migrate_legacy_program_files_data(target_root: Path | None = None) -> dict[str, object]:
+    """Copy user data from an older Program Files install into per-user install.
+
+    The migration is intentionally non-destructive: Program Files is not deleted,
+    and files already present in the per-user target are preserved. The installer
+    owns the new runtime manifest, so legacy config/version.json is skipped.
+    """
+
+    target = target_root or production_root()
+    legacy = legacy_program_files_root()
+    state: dict[str, object] = {
+        "source": str(legacy) if legacy else "",
+        "target": str(target),
+        "copied": [],
+        "skipped": [],
+        "errors": [],
+    }
+    if not legacy or not legacy.exists():
+        state["status"] = "no_legacy_program_files_install"
+        return state
+    try:
+        if legacy.resolve() == target.resolve():
+            state["status"] = "same_install_root"
+            return state
+    except OSError:
+        pass
+
+    data_dirs = ("config", "logs", "database", "parser_cache", "uploads")
+    for dirname in data_dirs:
+        source_dir = legacy / dirname
+        if not source_dir.exists() or not source_dir.is_dir():
+            continue
+        destination_dir = target / dirname
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        for source in source_dir.rglob("*"):
+            if not source.is_file():
+                continue
+            relative = source.relative_to(source_dir)
+            if dirname == "config" and relative.as_posix().lower() == "version.json":
+                state["skipped"].append(str(source))
+                continue
+            destination = destination_dir / relative
+            if destination.exists():
+                state["skipped"].append(str(source))
+                continue
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                state["copied"].append(str(destination))
+            except OSError as exc:
+                state["errors"].append(f"{source}: {type(exc).__name__}: {exc}")
+    state["status"] = "completed_with_errors" if state["errors"] else "completed"
     return state
 
 
@@ -176,6 +245,8 @@ def cleanup_update_artifacts(root: Path | None = None) -> list[str]:
         root / "config" / "version.pending.json",
         temp_dir / "AI_Customs_ERP_V2.update.exe",
         temp_dir / "AI_Customs_ERP_V2_update.bat",
+        temp_dir / "TongYangCustoms_Setup.update.exe",
+        temp_dir / "TongYangCustoms_setup_update.bat",
         temp_dir / "TongYangCustomsPlatform.update.exe",
         temp_dir / "TongYangCustomsPlatform_Setup.update.exe",
         temp_dir / "TongYangCustomsPlatform_setup_update.bat",

@@ -27,6 +27,7 @@ DESKTOP_ARTIFACT_NAMES = (
 )
 UPDATE_SCRIPT_NAMES = (
     "AI_Customs_ERP_V2_update.bat",
+    "TongYangCustoms_setup_update.bat",
     "TongYangCustomsPlatform_setup_update.bat",
     "update.bat",
 )
@@ -41,6 +42,17 @@ def _base_dir() -> Path:
 def _program_files_root() -> Path:
     program_files = os.environ.get("ProgramFiles") or r"C:\Program Files"
     return Path(program_files) / APP_DIR_NAME
+
+
+def _local_app_data_root() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / APP_DIR_NAME
+    return Path.home() / "AppData" / "Local" / APP_DIR_NAME
+
+
+def _install_root(machine_install: bool = False) -> Path:
+    return _program_files_root() if machine_install else _local_app_data_root()
 
 
 def _is_admin() -> bool:
@@ -91,6 +103,55 @@ def _copy_payload(root: Path) -> dict[str, str]:
     return {"install_root": str(root), "exe": str(target_exe)}
 
 
+def _migrate_legacy_program_files_data(target_root: Path, machine_install: bool = False) -> dict[str, object]:
+    source_root = _program_files_root()
+    state: dict[str, object] = {
+        "source": str(source_root),
+        "target": str(target_root),
+        "copied": [],
+        "skipped": [],
+        "errors": [],
+    }
+    if machine_install:
+        state["status"] = "machine_install_no_migration"
+        return state
+    if not source_root.exists():
+        state["status"] = "no_legacy_program_files_install"
+        return state
+    try:
+        if source_root.resolve() == target_root.resolve():
+            state["status"] = "same_install_root"
+            return state
+    except OSError:
+        pass
+
+    for dirname in ("config", "logs", "database", "parser_cache", "uploads"):
+        source_dir = source_root / dirname
+        if not source_dir.exists() or not source_dir.is_dir():
+            continue
+        destination_dir = target_root / dirname
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        for source in source_dir.rglob("*"):
+            if not source.is_file():
+                continue
+            relative = source.relative_to(source_dir)
+            if dirname == "config" and relative.as_posix().lower() == "version.json":
+                state["skipped"].append(str(source))
+                continue
+            destination = destination_dir / relative
+            if destination.exists():
+                state["skipped"].append(str(source))
+                continue
+            try:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+                state["copied"].append(str(destination))
+            except OSError as exc:
+                state["errors"].append(f"{source}: {type(exc).__name__}: {exc}")
+    state["status"] = "completed_with_errors" if state["errors"] else "completed"
+    return state
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -119,6 +180,8 @@ def _finalize_installed_manifest(root: Path, target_exe: Path) -> None:
 
 
 def _grant_runtime_permissions(root: Path) -> list[dict[str, str]]:
+    if not _is_program_files_path(root):
+        return [{"path": str(root), "returncode": "0", "status": "not_required_per_user_install"}]
     rows: list[dict[str, str]] = []
     # Builtin Users SID avoids localized group-name issues on Chinese Windows.
     users_sid = "*S-1-5-32-545"
@@ -151,6 +214,23 @@ def _grant_runtime_permissions(root: Path) -> list[dict[str, str]]:
         except Exception as exc:
             rows.append({"path": str(path), "returncode": "", "status": f"{type(exc).__name__}: {exc}"})
     return rows
+
+
+def _is_program_files_path(path: Path) -> bool:
+    roots = [os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")]
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path.absolute()
+    for root in roots:
+        if not root:
+            continue
+        try:
+            resolved.relative_to(Path(root).resolve())
+            return True
+        except (OSError, ValueError):
+            continue
+    return False
 
 
 def _ensure_shortcuts(exe: Path) -> list[dict[str, str]]:
@@ -269,14 +349,16 @@ def _write_install_log(root: Path, state: dict[str, object]) -> None:
 def main() -> int:
     silent = "--silent" in sys.argv or "--silent-update" in sys.argv
     no_launch = "--no-launch" in sys.argv
-    if os.name == "nt" and not _is_admin():
+    machine_install = "--machine" in sys.argv or "--program-files" in sys.argv
+    if os.name == "nt" and machine_install and not _is_admin():
         if silent:
             return 5
         _relaunch_as_admin()
         return 0
 
-    root = _program_files_root()
+    root = _install_root(machine_install)
     install_state = _copy_payload(root)
+    migration = _migrate_legacy_program_files_data(root, machine_install=machine_install)
     permissions = _grant_runtime_permissions(root)
     shortcuts = _ensure_shortcuts(Path(install_state["exe"]))
     desktop_cleanup = _cleanup_desktop_artifacts(Path(install_state["exe"]))
@@ -285,9 +367,11 @@ def main() -> int:
         "root": str(root),
         "exe": install_state["exe"],
         "permissions": permissions,
+        "migration": migration,
         "shortcuts": shortcuts,
         "desktop_cleanup": desktop_cleanup,
         "silent": silent,
+        "install_scope": "machine" if machine_install else "per_user",
     }
     _write_install_log(root, state)
     if not no_launch:
