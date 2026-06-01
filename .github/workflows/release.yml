@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version number, for example 1.1.3-dev or 1.1.3"
+        description: "Version number, for example 1.1.10-rc.5 or 1.1.10"
         required: true
         type: string
       channel:
@@ -53,23 +53,53 @@ jobs:
         id: vars
         shell: pwsh
         run: |
+          function Normalize-VersionInput {
+            param([string]$RawVersion)
+            $value = ([string]$RawVersion).Trim()
+            $value = $value -replace '^refs/tags/', ''
+            $value = $value -replace '^v', ''
+            return $value
+          }
+
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $version = "${{ inputs.version }}"
-            $channel = "${{ inputs.channel }}"
+            $normalizedVersion = Normalize-VersionInput "${{ inputs.version }}"
+            $requestedChannel = "${{ inputs.channel }}"
           } else {
             $manifest = Get-Content "config\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
-            $version = "$($manifest.version)" -replace "-dev\.\d+$", "-dev"
-            $channel = if ($version -match "-dev$") { "dev" } else { "stable" }
+            $normalizedVersion = Normalize-VersionInput "$($manifest.version)"
+            $requestedChannel = ""
           }
 
-          if ($channel -eq "dev") {
-            if ($version -notmatch "-dev$") { throw "DEV releases must use a -dev version." }
-            $version = $version -replace "-dev\.\d+$", "-dev"
+          $isRc = $normalizedVersion -match '^\d+\.\d+\.\d+-rc\.\d+$'
+          $isStable = $normalizedVersion -match '^\d+\.\d+\.\d+$'
+          if ($requestedChannel) {
+            if ($requestedChannel -eq "dev" -and -not $isRc) {
+              throw "DEV/RC releases must use vX.Y.Z-rc.N or X.Y.Z-rc.N. Received: $normalizedVersion"
+            }
+            if ($requestedChannel -eq "stable" -and -not $isStable) {
+              throw "Stable releases must use vX.Y.Z or X.Y.Z. Received: $normalizedVersion"
+            }
+            $channel = $requestedChannel
+          } elseif ($isRc) {
+            $channel = "dev"
+          } elseif ($isStable) {
+            $channel = "stable"
           } else {
-            if ($version -match "-dev") { throw "Stable releases cannot use a -dev version." }
+            throw "Unsupported release version '$normalizedVersion'. Use X.Y.Z-rc.N for RC/dev or X.Y.Z for stable."
           }
 
-          $tag = "v$version"
+          if ($channel -eq "dev" -and -not $isRc) {
+            throw "RC/dev channel requires X.Y.Z-rc.N. Received: $normalizedVersion"
+          }
+          if ($channel -eq "stable" -and -not $isStable) {
+            throw "Stable channel requires X.Y.Z. Received: $normalizedVersion"
+          }
+
+          $version = "v$normalizedVersion"
+          $tag = "v$normalizedVersion"
+          if ($tag -match '^vv') {
+            throw "Invalid release tag generated: $tag"
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "channel=$channel" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT

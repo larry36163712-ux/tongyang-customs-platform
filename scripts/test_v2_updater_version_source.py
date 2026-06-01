@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -17,6 +18,8 @@ from v2.core.updater import V2Updater, _compare_versions
 
 def main() -> None:
     work = Path(tempfile.gettempdir()) / "ai_customs_v2_version_source"
+    if work.exists():
+        shutil.rmtree(work)
     config = work / "config"
     logs = work / "logs"
     config.mkdir(parents=True, exist_ok=True)
@@ -61,12 +64,12 @@ def main() -> None:
         log_text = (logs / "update-debug.log").read_text(encoding="utf-8")
         updater_log_text = (logs / "updater.log").read_text(encoding="utf-8")
         required = [
-            f"local_version_path={local_manifest}",
+            "local exe sha matches remote; forcing current state and syncing manifest",
             "local_version=1.0.2",
             "remote_version=1.0.2",
-            "compare_result=0",
-            "sha_changed=False",
-            "update result=current same_version_same_build should_show_popup=False",
+            "local manifest synced",
+            "update result=current sha_match should_show_popup=False",
+            "local_sha256=abc remote_sha256=abc",
         ]
         missing = [item for item in required if item not in log_text]
         if missing:
@@ -80,6 +83,8 @@ def main() -> None:
             "local_version=1.0.2",
             "remote_version=1.0.2",
             "compare_result=0",
+            "sha_match=True",
+            "should_show_popup=False",
         ):
             if item not in version_log:
                 raise RuntimeError(f"version debug log missing: {item}")
