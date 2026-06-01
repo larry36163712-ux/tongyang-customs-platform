@@ -1,17 +1,17 @@
 ﻿{
     "app_name":  "通洋報關平台",
-    "version":  "v1.1.10-rc.4",
+    "version":  "v1.1.10-rc.5",
     "channel":  "dev",
-    "exe_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.4/TongYangCustomsPlatform_Setup.exe",
-    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.4/TongYangCustomsPlatform_Setup.exe",
-    "sha256":  "bf64d7074df5a5f881ef5c7e4aea1e81f9532157faf9b0ed3feddad2e512146f",
-    "app_sha256":  "bf64d7074df5a5f881ef5c7e4aea1e81f9532157faf9b0ed3feddad2e512146f",
-    "build_id":  "v1.1.10-rc.4-bf64d7074df5",
-    "build_time":  "2026-06-01T01:35:03+00:00",
-    "release_id":  "v1.1.10-rc.4",
-    "release_notes":  "Internal RC v1.1.10-rc.4: includes Phase 7A audit rules, Phase 7B Taiwan customs knowledge layer, Phase 7C QA hardening, and Phase 7D audit feedback engine.",
-    "notes":  "Internal RC v1.1.10-rc.4: includes Phase 7A audit rules, Phase 7B Taiwan customs knowledge layer, Phase 7C QA hardening, and Phase 7D audit feedback engine.",
+    "exe_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.5/TongYangCustomsPlatform_Setup.exe",
+    "download_url":  "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.5/TongYangCustomsPlatform_Setup.exe",
+    "sha256":  "c79e11441dbe9cb907a1eb0eaf3e1df9a1bf16fd1bee12df7af779681b042d4a",
+    "app_sha256":  "c79e11441dbe9cb907a1eb0eaf3e1df9a1bf16fd1bee12df7af779681b042d4a",
+    "build_id":  "v1.1.10-rc.5-c79e11441dbe",
+    "build_time":  "2026-06-01T07:52:40+00:00",
+    "release_id":  "v1.1.10-rc.5",
+    "release_notes":  "Internal RC v1.1.10-rc.5: includes Desktop Shortcut Cleanup and Single Entry Enforcement commit 5608182. Desktop and Start Menu entries are repaired to the LocalAppData production EXE; release remains internal RC only.",
+    "notes":  "Internal RC v1.1.10-rc.5: includes Desktop Shortcut Cleanup and Single Entry Enforcement commit 5608182. Desktop and Start Menu entries are repaired to the LocalAppData production EXE; release remains internal RC only.",
     "minimum_supported_version":  "v1.1.10-rc.1",
     "package_type":  "installer",
-    "package_sha256":  "a4f4231173e59ef43aa133f30d487bd09ef910276f8bae2277448b701f49051b"
+    "package_sha256":  "e7d2734bbb61c849916524977e986a8625849f5c216b0b6e468dcdb24210d1e9"
 }
