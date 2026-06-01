@@ -303,11 +303,37 @@ class V2Updater:
         cache_dir = config_dir / "updater_cache"
         if cache_dir.exists() and cache_dir.is_dir():
             removed.extend(self._remove_directory(cache_dir, "reset updater cache cleanup failed"))
-        for dirty_dir in (config_dir / "temp_update", temp_dir / "temp_update", temp_dir / "TongYangCustomsPlatform.temp_update"):
+        for dirty_dir in (
+            config_dir / "temp_update",
+            self._updater_temp_dir(create=False),
+            temp_dir / "temp_update",
+            temp_dir / "TongYangCustomsPlatform.temp_update",
+        ):
             if dirty_dir.exists() and dirty_dir.is_dir():
                 removed.extend(self._remove_directory(dirty_dir, "reset temp update cleanup failed"))
         if getattr(sys, "frozen", False):
             removed.extend(cleanup_update_artifacts(production_root()))
+        return removed
+
+    def _updater_temp_dir(self, create: bool = True) -> Path:
+        root = production_root() if getattr(sys, "frozen", False) else self.local_version_path.parent.parent
+        path = root / "updater" / "temp"
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _clear_updater_temp_dir(self) -> list[str]:
+        path = self._updater_temp_dir(create=True)
+        removed: list[str] = []
+        for child in list(path.iterdir()):
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+                removed.append(str(child))
+            except OSError as exc:
+                self._log(f"updater temp cleanup failed path={child} error={exc}")
         return removed
 
     def _remove_directory(self, path: Path, log_prefix: str) -> list[str]:
@@ -455,8 +481,9 @@ class V2Updater:
         if not manifest.sha256:
             raise RuntimeError("version.json 缺少 sha256")
 
+        self._clear_updater_temp_dir()
         target_name = "TongYangCustomsPlatform_Setup.update.exe" if self._is_installer_manifest(manifest) else "AI_Customs_ERP_V2.update.exe"
-        target = Path(tempfile.gettempdir()) / target_name
+        target = self._updater_temp_dir() / target_name
         target.unlink(missing_ok=True)
         self._log(f"download start {manifest.download_url} -> {target}")
 
@@ -523,7 +550,7 @@ class V2Updater:
                 "Direct EXE replacement is blocked."
             )
         backup_exe = current_exe.with_suffix(".rollback.exe")
-        script_path = Path(tempfile.gettempdir()) / "AI_Customs_ERP_V2_update.bat"
+        script_path = update_exe.parent / "AI_Customs_ERP_V2_update.bat"
         script = build_replace_script(
             current_exe=current_exe,
             update_exe=update_exe,
@@ -546,7 +573,7 @@ class V2Updater:
         if not getattr(sys, "frozen", False):
             raise RuntimeError("目前不是 EXE 執行狀態，略過自動安裝")
 
-        script_path = Path(tempfile.gettempdir()) / "TongYangCustomsPlatform_setup_update.bat"
+        script_path = setup_exe.parent / "TongYangCustomsPlatform_setup_update.bat"
         if self._requires_installer_update():
             install_command = (
                 'powershell -NoProfile -ExecutionPolicy Bypass -Command '
@@ -559,6 +586,7 @@ setlocal EnableExtensions
 set "SETUP={setup_exe}"
 set "LOG={self.log_path}"
 set "OLD_PID={os.getpid()}"
+set "TEMP_DIR=%~dp0"
 echo [%date% %time%] setup update scheduled setup=%SETUP% >> "%LOG%"
 for /l %%i in (1,1,60) do (
   tasklist /FI "PID eq %OLD_PID%" | findstr /R /C:" %OLD_PID% " > nul
@@ -574,6 +602,7 @@ if errorlevel 1 (
 )
 del /f /q "%SETUP%" >> "%LOG%" 2>&1
 echo [%date% %time%] setup update completed >> "%LOG%"
+start "" /b powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 2; Remove-Item -LiteralPath $env:TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
 exit /b 0
 """
         script_path.write_text(script, encoding="utf-8")
@@ -880,7 +909,8 @@ def build_replace_script(
     )
     cleanup_lines = (
         'del /f /q "%UPDATE%" >> "%LOG%" 2>&1\n'
-        'del /f /q "%BACKUP%" >> "%LOG%" 2>&1'
+        'del /f /q "%BACKUP%" >> "%LOG%" 2>&1\n'
+        'start "" /b powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 2; Remove-Item -LiteralPath $env:UPDATER_TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1'
         if cleanup
         else 'echo [%date% %time%] cleanup skipped >> "%LOG%"'
     )
@@ -894,6 +924,7 @@ set "LOCAL_MANIFEST={local_manifest_path or ""}"
 set "PENDING_MANIFEST={pending_manifest_path or ""}"
 set "EXPECTED_SHA={expected_sha256.lower()}"
 set "OLD_PID={old_pid}"
+set "UPDATER_TEMP_DIR=%~dp0"
 
 if not exist "%~dp0" mkdir "%~dp0" > nul 2>&1
 if not exist "%LOG%" type nul > "%LOG%"

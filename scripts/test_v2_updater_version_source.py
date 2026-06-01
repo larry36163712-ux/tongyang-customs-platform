@@ -53,6 +53,62 @@ def main() -> None:
         if updater.current_version != "1.0.2":
             raise RuntimeError(f"expected local manifest version, got {updater.current_version}")
 
+        settings_file = config / "v2_settings.json"
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "update": {
+                        "enabled": True,
+                        "check_on_startup": True,
+                        "channel": "stable",
+                        "stable_manifest_url": "https://github.com/example/repo/releases/latest/download/version.json",
+                        "dev_manifest_url": "https://raw.githubusercontent.com/example/repo/main/config/dev_version.json",
+                    },
+                    "developer_mode": False,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        local_manifest.write_text(
+            json.dumps(
+                {
+                    "version": "v1.1.10-rc.5",
+                    "download_url": "local",
+                    "sha256": "abc",
+                    "channel": "dev",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        original_frozen = getattr(sys, "frozen", None)
+        sys.frozen = True  # type: ignore[attr-defined]
+        try:
+            reconciled = settings_module.load_settings()
+        finally:
+            if original_frozen is None:
+                delattr(sys, "frozen")
+            else:
+                sys.frozen = original_frozen  # type: ignore[attr-defined]
+        if reconciled.update.channel != "dev":
+            raise RuntimeError(f"RC version must force dev channel, got {reconciled.update.channel}")
+        persisted_settings = json.loads(settings_file.read_text(encoding="utf-8"))
+        if persisted_settings["update"]["channel"] != "dev":
+            raise RuntimeError("channel reconciliation was not persisted to v2_settings.json")
+        local_manifest.write_text(
+            json.dumps(
+                {
+                    "version": "1.0.2",
+                    "download_url": "local",
+                    "sha256": "abc",
+                    "channel": "stable",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
         remote = updater_module.UpdateManifest("1.0.2", "local", "abc", "stable")
         updater._load_manifest = lambda: remote  # type: ignore[method-assign]
         result = updater.check()
@@ -168,10 +224,13 @@ def main() -> None:
             path.write_text("dirty", encoding="utf-8")
         cache_dir = config / "updater_cache"
         temp_update_dir = config / "temp_update"
+        updater_temp_dir = work / "updater" / "temp"
         cache_dir.mkdir(exist_ok=True)
         temp_update_dir.mkdir(exist_ok=True)
+        updater_temp_dir.mkdir(parents=True, exist_ok=True)
         (cache_dir / "github.json").write_text("dirty", encoding="utf-8")
         (temp_update_dir / "old.exe").write_text("dirty", encoding="utf-8")
+        (updater_temp_dir / "TongYangCustomsPlatform_Setup.update.exe").write_text("dirty", encoding="utf-8")
         updater._load_manifest = lambda: updater_module.UpdateManifest("1.0.3", "local", "def", "stable")  # type: ignore[method-assign]
         reset_state = updater.reset_state()
         if reset_state.get("update_state") != "current_sha_match":
@@ -181,7 +240,7 @@ def main() -> None:
         for path in dirty_files:
             if path.exists():
                 raise RuntimeError(f"dirty updater state was not removed: {path}")
-        if cache_dir.exists() or temp_update_dir.exists():
+        if cache_dir.exists() or temp_update_dir.exists() or updater_temp_dir.exists():
             raise RuntimeError("dirty updater cache directories were not removed")
 
         dev_called = False

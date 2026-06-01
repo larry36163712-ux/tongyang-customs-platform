@@ -28,6 +28,7 @@ DESKTOP_ARTIFACT_NAMES = (
     "TongYangCustomsPlatform.update.exe",
     "TongYangCustomsPlatform_Setup.update.exe",
     "updater.exe",
+    "version.json",
     "SHA256.txt",
 )
 DESKTOP_ARTIFACT_PATTERNS = (
@@ -262,6 +263,7 @@ def cleanup_update_artifacts(root: Path | None = None) -> list[str]:
         root / "cache" / "updater",
         root / "config" / "updater_cache",
         root / "config" / "temp_update",
+        root / "updater" / "temp",
         temp_dir / "TongYangCustomsPlatform.temp_update",
         temp_dir / "temp_update",
     ]

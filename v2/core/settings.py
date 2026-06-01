@@ -131,9 +131,15 @@ def load_settings() -> V2Settings:
     if not getattr(sys, "frozen", False):
         channel = "dev"
 
-    local_version = resolve_local_version()
-    version_debug_log(f"load_settings local_version={local_version} channel={channel}")
-    return V2Settings(
+    local_manifest = read_local_manifest()
+    local_version = str(local_manifest.get("version", "")).strip() or resolve_local_version()
+    manifest_channel = str(local_manifest.get("channel", "")).strip().lower()
+    channel, reconciled_reason = reconcile_update_channel(local_version, manifest_channel, channel)
+    if not getattr(sys, "frozen", False) and channel != "dev":
+        channel = "dev"
+        reconciled_reason = reconciled_reason or "source_dev_default"
+
+    settings = V2Settings(
         version=local_version,
         developer_mode=bool(data.get("developer_mode", False)),
         update=UpdateSettings(
@@ -154,6 +160,14 @@ def load_settings() -> V2Settings:
             ),
         ),
     )
+    version_debug_log(
+        f"load_settings local_version={local_version} manifest_channel={manifest_channel or '-'} "
+        f"channel={channel} reconciled={bool(reconciled_reason)} reason={reconciled_reason or '-'}"
+    )
+    if reconciled_reason:
+        save_settings(settings)
+        version_debug_log(f"settings channel reconciled and saved channel={settings.update.channel} reason={reconciled_reason}")
+    return settings
 
 
 def save_settings(settings: V2Settings) -> None:
@@ -171,3 +185,16 @@ def resolve_local_version(default: str = "") -> str:
     if version:
         return version
     return default
+
+
+def reconcile_update_channel(version: str, manifest_channel: str, settings_channel: str) -> tuple[str, str]:
+    configured = settings_channel if settings_channel in {"dev", "stable"} else "stable"
+    manifest = manifest_channel if manifest_channel in {"dev", "stable"} else ""
+    normalized_version = str(version or "").strip().lower()
+    if "-rc." in normalized_version and configured != "dev":
+        return "dev", "rc_version_forces_dev"
+    if "-rc." in normalized_version:
+        return "dev", "" if configured == "dev" else "rc_version_forces_dev"
+    if manifest and manifest != configured:
+        return manifest, "manifest_channel_mismatch"
+    return configured, ""

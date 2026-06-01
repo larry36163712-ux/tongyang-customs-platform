@@ -24,6 +24,7 @@ DESKTOP_ARTIFACT_NAMES = (
     "TongYangCustomsPlatform.update.exe",
     "TongYangCustomsPlatform_Setup.update.exe",
     "updater.exe",
+    "version.json",
     "SHA256.txt",
 )
 DESKTOP_ARTIFACT_PATTERNS = (
@@ -106,8 +107,39 @@ def _copy_payload(root: Path) -> dict[str, str]:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
     _finalize_installed_manifest(root, target_exe)
+    _clear_update_state(root)
 
     return {"install_root": str(root), "exe": str(target_exe)}
+
+
+def _clear_update_state(root: Path) -> list[str]:
+    removed: list[str] = []
+    config = root / "config"
+    for name in (
+        "version.pending.json",
+        "pending_update.json",
+        "update_state.json",
+        "local_manifest.json",
+        "updater_cache.json",
+        "sha_cache.json",
+        "stale_sha_cache.json",
+    ):
+        path = config / name
+        try:
+            if path.exists() and path.is_file():
+                path.unlink()
+                removed.append(str(path))
+        except OSError:
+            continue
+    for dirname in ("updater_cache", "temp_update"):
+        path = config / dirname
+        try:
+            if path.exists() and path.is_dir():
+                shutil.rmtree(path)
+                removed.append(str(path))
+        except OSError:
+            continue
+    return removed
 
 
 def _migrate_legacy_program_files_data(target_root: Path, machine_install: bool = False) -> dict[str, object]:

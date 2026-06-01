@@ -38,6 +38,7 @@ def main() -> int:
                 desktop / "TongYangCustomsPlatform_Setup.exe",
                 desktop / "updater.exe",
                 desktop / "update.bat",
+                desktop / "version.json",
                 desktop / "SHA256.txt",
                 desktop / "TongYangCustomsPlatform.update.exe",
                 desktop / "TongYangCustomsPlatform.temp.exe",
@@ -47,6 +48,7 @@ def main() -> int:
                 public_desktop / "TongYangCustomsPlatform_Setup.exe",
                 public_desktop / "updater.exe",
                 public_desktop / "update.bat",
+                public_desktop / "version.json",
                 public_desktop / "SHA256.txt",
             ]
             for path in forbidden:
