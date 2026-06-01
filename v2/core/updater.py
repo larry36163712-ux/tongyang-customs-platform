@@ -26,6 +26,7 @@ from v2.core.settings import (
     version_debug_log,
 )
 from v2.core.deployment import (
+    cleanup_desktop_artifacts,
     cleanup_update_artifacts,
     ensure_shortcuts,
     inspect_shortcuts,
@@ -710,10 +711,22 @@ exit /b 0
         current_exe = Path(sys.executable).resolve()
         if current_exe.name.lower() != "tongyangcustomsplatform.exe":
             return []
+        removed = cleanup_desktop_artifacts(current_exe)
         repaired = repair_desktop_shortcuts(str(current_exe))
+        cleanup_rows = [
+            {
+                "shortcut_path": path,
+                "target_path": "",
+                "previous_target_path": "",
+                "action": "removed_desktop_artifact",
+            }
+            for path in removed
+        ]
+        if removed:
+            self._log("desktop artifacts cleaned " + json.dumps(removed, ensure_ascii=False))
         if repaired:
             self._log("shortcut repaired " + json.dumps(repaired, ensure_ascii=False))
-        return repaired
+        return cleanup_rows + repaired
 
 
 def inspect_desktop_shortcuts(current_exe: str) -> list[dict[str, str]]:

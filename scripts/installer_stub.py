@@ -23,7 +23,14 @@ DESKTOP_ARTIFACT_NAMES = (
     "AI_Customs_ERP_V2.update.exe",
     "TongYangCustomsPlatform.update.exe",
     "TongYangCustomsPlatform_Setup.update.exe",
+    "updater.exe",
     "SHA256.txt",
+)
+DESKTOP_ARTIFACT_PATTERNS = (
+    "*.update.exe",
+    "*.temp.exe",
+    "*.tmp.exe",
+    "*.new.exe",
 )
 UPDATE_SCRIPT_NAMES = (
     "AI_Customs_ERP_V2_update.bat",
@@ -240,8 +247,11 @@ $exe = $env:TY_APP_EXE
 $name = $env:TY_APP_NAME
 $shell = New-Object -ComObject WScript.Shell
 $desktop = [Environment]::GetFolderPath("Desktop")
+$publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 $programs = [Environment]::GetFolderPath("Programs")
 $startMenu = Join-Path $programs "TongYang Customs Platform"
+$publicPrograms = [Environment]::GetFolderPath("CommonPrograms")
+$publicStartMenu = if ($publicPrograms) { Join-Path $publicPrograms "TongYang Customs Platform" } else { "" }
 if (-not (Test-Path -LiteralPath $startMenu)) { New-Item -ItemType Directory -Path $startMenu -Force | Out-Null }
 $targets = @(
   (Join-Path $desktop ($name + ".lnk")),
@@ -257,24 +267,26 @@ foreach ($shortcutPath in $targets) {
   $shortcut.Save()
   $rows += [pscustomobject]@{ shortcut_path=$shortcutPath; target_path=$exe; previous_target_path=$previous; action="created_or_repaired" }
 }
-foreach ($dir in @($desktop, $startMenu)) {
+$canonicalPaths = $targets
+foreach ($dir in @($desktop, $publicDesktop, $startMenu, $publicStartMenu)) {
+  if (-not $dir -or -not (Test-Path -LiteralPath $dir)) { continue }
   foreach ($lnk in Get-ChildItem -LiteralPath $dir -Filter *.lnk -Force -ErrorAction SilentlyContinue) {
     try {
       $sc = $shell.CreateShortcut($lnk.FullName)
       $target = [string]$sc.TargetPath
       $targetName = if ($target) { [IO.Path]::GetFileName($target) } else { "" }
-      $isCanonical = ($lnk.FullName -eq (Join-Path $desktop ($name + ".lnk"))) -or ($lnk.FullName -eq (Join-Path $startMenu ($name + ".lnk")))
+      $isCanonical = $canonicalPaths -contains $lnk.FullName
       $related = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關|报关"
-      if ($related -and $target -ne $exe) {
+      if ($related -and -not $isCanonical) {
+        Remove-Item -LiteralPath $lnk.FullName -Force -ErrorAction Stop
+        $rows += [pscustomobject]@{ shortcut_path=$lnk.FullName; target_path=$target; previous_target_path=$target; action="removed_duplicate_shortcut" }
+      } elseif ($related -and $target -ne $exe) {
         $previous = $target
         $sc.TargetPath = $exe
         $sc.WorkingDirectory = [IO.Path]::GetDirectoryName($exe)
         $sc.IconLocation = $exe
         $sc.Save()
         $rows += [pscustomobject]@{ shortcut_path=$lnk.FullName; target_path=$exe; previous_target_path=$previous; action="repaired_old_shortcut" }
-      } elseif ($related -and -not $isCanonical) {
-        Remove-Item -LiteralPath $lnk.FullName -Force -ErrorAction SilentlyContinue
-        $rows += [pscustomobject]@{ shortcut_path=$lnk.FullName; target_path=$target; previous_target_path=$target; action="removed_duplicate_shortcut" }
       }
     } catch {}
   }
@@ -332,6 +344,15 @@ def _cleanup_desktop_artifacts(installed_exe: Path) -> list[str]:
                     removed.append(str(path))
             except OSError:
                 continue
+        for pattern in DESKTOP_ARTIFACT_PATTERNS:
+            for path in directory.glob(pattern):
+                try:
+                    if not path.is_file() or path.resolve() == installed_exe.resolve():
+                        continue
+                    path.unlink()
+                    removed.append(str(path))
+                except OSError:
+                    continue
     return removed
 
 

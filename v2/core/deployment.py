@@ -27,7 +27,14 @@ DESKTOP_ARTIFACT_NAMES = (
     "AI_Customs_ERP_V2.update.exe",
     "TongYangCustomsPlatform.update.exe",
     "TongYangCustomsPlatform_Setup.update.exe",
+    "updater.exe",
     "SHA256.txt",
+)
+DESKTOP_ARTIFACT_PATTERNS = (
+    "*.update.exe",
+    "*.temp.exe",
+    "*.tmp.exe",
+    "*.new.exe",
 )
 
 
@@ -279,9 +286,9 @@ def cleanup_update_artifacts(root: Path | None = None) -> list[str]:
 def cleanup_desktop_artifacts(production_exe: Path | None = None) -> list[str]:
     """Remove known deployment leftovers from Desktop folders.
 
-    The cleanup is intentionally conservative: only exact release/update
-    artifact names are removed. User documents and unrelated shortcuts are left
-    alone.
+    The cleanup is intentionally conservative: only release/update artifact
+    names and generated temp executable patterns are removed from the Desktop
+    roots. User documents and unrelated shortcuts are left alone.
     """
 
     exe = (production_exe or production_exe_path()).resolve()
@@ -306,6 +313,15 @@ def cleanup_desktop_artifacts(production_exe: Path | None = None) -> list[str]:
                     removed.append(str(path))
             except OSError:
                 continue
+        for pattern in DESKTOP_ARTIFACT_PATTERNS:
+            for path in directory.glob(pattern):
+                try:
+                    if not path.is_file() or path.resolve() == exe:
+                        continue
+                    path.unlink()
+                    removed.append(str(path))
+                except OSError:
+                    continue
     return removed
 
 
@@ -316,7 +332,10 @@ $ErrorActionPreference = "Stop"
 $exe = $env:TY_PRODUCTION_EXE
 $name = $env:TY_DISPLAY_NAME
 $desktop = [Environment]::GetFolderPath("Desktop")
+$publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 $startMenu = Join-Path ([Environment]::GetFolderPath("Programs")) "TongYang Customs Platform"
+$publicPrograms = [Environment]::GetFolderPath("CommonPrograms")
+$publicStartMenu = if ($publicPrograms) { Join-Path $publicPrograms "TongYang Customs Platform" } else { "" }
 $dirs = @($desktop, $startMenu) | Where-Object { $_ }
 $shell = New-Object -ComObject WScript.Shell
 $rows = @()
@@ -336,7 +355,10 @@ foreach ($dir in $dirs) {
     action = "created_or_repaired"
   }
 }
-$scanDirs = @($desktop, [Environment]::GetFolderPath("CommonDesktopDirectory"), $startMenu) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+$canonicalDesktop = Join-Path $desktop ($name + ".lnk")
+$canonicalStartMenu = Join-Path $startMenu ($name + ".lnk")
+$canonicalPaths = @($canonicalDesktop, $canonicalStartMenu)
+$scanDirs = @($desktop, $publicDesktop, $startMenu, $publicStartMenu) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
 foreach ($dir in $scanDirs) {
   foreach ($lnk in Get-ChildItem -LiteralPath $dir -Filter *.lnk -Force -ErrorAction SilentlyContinue) {
     try {
@@ -344,9 +366,17 @@ foreach ($dir in $scanDirs) {
       $target = [string]$sc.TargetPath
       $targetName = ""
       if ($target) { $targetName = [IO.Path]::GetFileName($target) }
-      $isCanonical = ($lnk.FullName -eq (Join-Path $desktop ($name + ".lnk"))) -or ($lnk.FullName -eq (Join-Path $startMenu ($name + ".lnk")))
+      $isCanonical = $canonicalPaths -contains $lnk.FullName
       $looksRelated = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關|报关"
-      if ($looksRelated -and $target -ne $exe) {
+      if ($looksRelated -and -not $isCanonical) {
+        Remove-Item -LiteralPath $lnk.FullName -Force -ErrorAction Stop
+        $rows += [pscustomobject]@{
+          shortcut_path = $lnk.FullName
+          target_path = $target
+          previous_target_path = $target
+          action = "removed_duplicate_shortcut"
+        }
+      } elseif ($looksRelated -and $target -ne $exe) {
         $before = $target
         $sc.TargetPath = $exe
         $sc.WorkingDirectory = [IO.Path]::GetDirectoryName($exe)
@@ -357,14 +387,6 @@ foreach ($dir in $scanDirs) {
           target_path = $sc.TargetPath
           previous_target_path = $before
           action = "repaired_old_shortcut"
-        }
-      } elseif ($looksRelated -and -not $isCanonical) {
-        Remove-Item -LiteralPath $lnk.FullName -Force -ErrorAction SilentlyContinue
-        $rows += [pscustomobject]@{
-          shortcut_path = $lnk.FullName
-          target_path = $target
-          previous_target_path = $target
-          action = "removed_duplicate_shortcut"
         }
       }
     } catch {
@@ -391,8 +413,11 @@ def inspect_shortcuts(exe_path: Path | None = None) -> list[dict[str, str]]:
 $ErrorActionPreference = "Stop"
 $exe = $env:TY_PRODUCTION_EXE
 $desktop = [Environment]::GetFolderPath("Desktop")
+$publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
 $startMenu = Join-Path ([Environment]::GetFolderPath("Programs")) "TongYang Customs Platform"
-$dirs = @($desktop, [Environment]::GetFolderPath("CommonDesktopDirectory"), $startMenu) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+$publicPrograms = [Environment]::GetFolderPath("CommonPrograms")
+$publicStartMenu = if ($publicPrograms) { Join-Path $publicPrograms "TongYang Customs Platform" } else { "" }
+$dirs = @($desktop, $publicDesktop, $startMenu, $publicStartMenu) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
 $shell = New-Object -ComObject WScript.Shell
 $rows = @()
 foreach ($dir in $dirs) {
