@@ -52,6 +52,7 @@ def main() -> None:
         return
 
     release = github_json(f"https://api.github.com/repos/{args.repo}/releases/tags/{args.tag}", args.token)
+    validate_tag_policy(args.tag, args.channel)
     if release.get("draft"):
         raise SystemExit(f"release must not remain draft after verification: {args.tag}")
     expected_prerelease = args.channel == "dev"
@@ -62,6 +63,9 @@ def main() -> None:
     missing = [name for name in REQUIRED_ASSETS if name not in assets]
     if missing:
         raise SystemExit(f"release {args.tag} missing required asset(s): {', '.join(missing)}")
+    unexpected = sorted(name for name in assets if name not in REQUIRED_ASSETS)
+    if unexpected:
+        raise SystemExit(f"release {args.tag} has unexpected asset(s): {', '.join(unexpected)}")
 
     manifest_url = assets["version.json"].get("browser_download_url", "")
     exe_url = assets[OFFICIAL_INSTALLER_NAME].get("browser_download_url", "")
@@ -111,6 +115,7 @@ def main() -> None:
 
 
 def validate_manifest_schema(manifest: dict, repo: str, tag: str, channel: str) -> None:
+    validate_tag_policy(tag, channel)
     if not isinstance(manifest, dict):
         raise SystemExit("version.json must be a JSON object")
     missing = [field for field in REQUIRED_MANIFEST_FIELDS if not str(manifest.get(field, "")).strip()]
@@ -135,6 +140,15 @@ def validate_manifest_schema(manifest: dict, repo: str, tag: str, channel: str) 
             "version.json exe_url violates channel policy: "
             f"{manifest['exe_url']} expected {expected_exe_url(repo, tag, channel)}"
         )
+
+
+def validate_tag_policy(tag: str, channel: str) -> None:
+    if channel == "stable":
+        if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+            raise SystemExit(f"stable release tag must look like v1.1.10. Received: {tag}")
+        return
+    if not re.fullmatch(r"v\d+\.\d+\.\d+-rc\.\d+", tag):
+        raise SystemExit(f"RC/dev release tag must look like v1.1.10-rc.4. Received: {tag}")
 
 
 def expected_exe_url(repo: str, tag: str, channel: str) -> str:

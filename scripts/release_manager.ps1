@@ -174,6 +174,10 @@ function Assert-ReleaseAssets {
             throw "Release $ReleaseTag missing required asset: $name. Current assets: $($assetNames -join ', ')"
         }
     }
+    $unexpected = @($assetNames | Where-Object { $required -notcontains $_ })
+    if ($unexpected.Count -gt 0) {
+        throw "Release $ReleaseTag has unexpected asset(s): $($unexpected -join ', '). Allowed assets: $($required -join ', ')"
+    }
 
     $manifestAsset = $release.assets | Where-Object { $_.name -eq "version.json" } | Select-Object -First 1
     $exeAsset = $release.assets | Where-Object { $_.name -eq $OfficialExeName } | Select-Object -First 1

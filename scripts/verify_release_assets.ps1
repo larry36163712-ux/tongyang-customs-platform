@@ -29,6 +29,10 @@ foreach ($required in $RequiredAssets) {
         throw "Release $Tag is missing required asset: $required. Current assets: $($assetNames -join ', ')"
     }
 }
+$unexpected = @($assetNames | Where-Object { $RequiredAssets -notcontains $_ })
+if ($unexpected.Count -gt 0) {
+    throw "Release $Tag has unexpected asset(s): $($unexpected -join ', '). Allowed assets: $($RequiredAssets -join ', ')"
+}
 
 $officialExeName = "TongYangCustomsPlatform_Setup.exe"
 $exeAsset = $release.assets | Where-Object { $_.name -eq $officialExeName } | Select-Object -First 1

@@ -1,58 +1,100 @@
 # Release Governance System
 
 This project treats updater compatibility as a release contract. UI, parser,
-OCR, intake, and audit changes must not change release asset names, manifest
-fields, or channel routing.
+OCR, intake, audit, and feedback changes must not change release asset names,
+manifest fields, or channel routing.
 
-## Release Contract
+## Naming Policy
 
-Every published release must contain:
+Stable releases use plain semantic tags:
 
-- `TongYangCustomsPlatform.exe`
+- `v1.1.10`
+- `v1.1.11`
+
+Internal RC releases use numbered pre-release tags:
+
+- `v1.1.10-rc.1`
+- `v1.1.10-rc.2`
+- `v1.1.10-rc.3`
+- `v1.1.10-rc.4`
+
+Old `-dev` release names are retired for production distribution.
+
+## Asset Contract
+
+Every published Stable or RC release must contain exactly these assets:
+
+- `TongYangCustomsPlatform_Setup.exe`
 - `version.json`
 - `SHA256.txt`
 
-`version.json` must contain these stable fields:
+No other release assets are allowed. In particular, do not publish naked app
+EXEs, update scripts, debug logs, temporary EXEs, cache files, or test data.
+
+## Manifest Contract
+
+`version.json` and `dev_version.json` must contain these fields:
 
 ```json
 {
   "version": "...",
   "channel": "...",
   "exe_url": "...",
+  "download_url": "...",
   "release_notes": "...",
   "minimum_supported_version": "...",
   "build_id": "...",
   "build_time": "...",
-  "sha256": "..."
+  "sha256": "...",
+  "app_sha256": "...",
+  "package_type": "installer",
+  "package_sha256": "..."
 }
 ```
+
+`sha256` is the installed app EXE hash and must equal `app_sha256`.
+`package_sha256` is the installer package hash and must match
+`TongYangCustomsPlatform_Setup.exe`.
 
 Field names are part of the updater contract and must not be renamed.
 
 ## Channel Policy
 
-Stable updater reads:
+Stable channel reads only:
 
 `https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json`
 
 Stable `exe_url` must use:
 
-`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe`
+`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform_Setup.exe`
 
-DEV updater reads `config/dev_version.json` from the repository raw URL. DEV
-release assets are tag-specific and must not move `/releases/latest`.
+Dev/Internal RC channel reads only:
+
+`https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json`
+
+RC `exe_url` must be tag-specific:
+
+`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/vX.Y.Z-rc.N/TongYangCustomsPlatform_Setup.exe`
+
+RC releases must be GitHub pre-releases and must not become `/releases/latest`.
+Stable releases must not be pre-releases and may become `/releases/latest`.
 
 ## Verification
 
 `scripts/release_contract.py` verifies:
 
+- release tag naming policy
+- pre-release flag matches the channel
+- release is not draft
 - required assets exist
-- asset URLs return HTTP 200
+- no unexpected assets exist
+- asset URLs return HTTP 2xx
 - `version.json` schema is valid
 - `exe_url` follows the channel policy
-- `sha256` exists and is 64 lowercase hex characters
-- `SHA256.txt` contains the same hash and the official executable name
-- stable `/releases/latest` points to the expected stable tag
+- `sha256` and `app_sha256` match
+- `package_sha256` is a 64-character lowercase hex digest
+- `SHA256.txt` contains `package_sha256`
+- stable `/releases/latest` points to the expected stable tag when requested
 
 Release workflows must fail if any check fails.
 
@@ -65,11 +107,12 @@ Cleanup must verify stable latest before deleting anything. It must never delete
 - current updater target
 - required assets from a retained release
 
-DEV cleanup may delete old DEV releases and tags only. Stable cleanup keeps the
-latest stable release plus recent stable rollback versions.
+RC cleanup may delete only retired RC or legacy DEV releases when explicitly
+requested by the release manager. Stable cleanup keeps the latest stable release
+plus recent stable rollback versions.
 
 ## Rollback
 
 Stable releases keep recent history so a broken stable can be replaced by
-promoting a previous stable tag. DEV releases are not rollback targets for
-company computers.
+promoting a previous stable tag. RC releases are internal validation targets and
+are not rollback targets for company computers on the stable channel.

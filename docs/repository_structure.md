@@ -61,41 +61,49 @@ Formal build files:
 
 - `AI_Customs_ERP_V2.spec`
 - `build_v2_exe.ps1`
-- `build_dev_release.ps1`
+- `scripts/build_release_package.ps1`
+- `scripts/release_manager.ps1`
+- `scripts/release_contract.py`
 
 `build_v2_exe.ps1` builds the V2 PySide6 executable from `v2/main.py`.
 
-`build_dev_release.ps1` coordinates DEV release preparation: version sync, tests, build, manifest/SHA generation, commit/push, release creation/update, cleanup, and asset verification.
+`scripts/build_release_package.ps1` builds the installer release package and
+writes the app and package SHA values into the release manifest.
 
-The GitHub release executable asset name is always:
+The GitHub release installer asset name is always:
+
+`TongYangCustomsPlatform_Setup.exe`
+
+The installed app executable remains:
 
 `TongYangCustomsPlatform.exe`
 
-The local built executable may remain:
-
-`通洋報關平台.exe`
-
-This separation avoids GitHub Release asset filename issues without changing UI text, product name, or window title.
+The release must also contain only `version.json` and `SHA256.txt`.
 
 ## Release Pipeline
 
-`.github/workflows/release.yml` is the maintained DEV/STABLE release workflow.
+The maintained release workflow is the PowerShell release package plus release
+manager flow:
 
-DEV releases:
+- `scripts/build_release_package.ps1`
+- `scripts/release_manager.ps1`
+- `scripts/release_contract.py`
 
-- require a `-dev` version
-- use a single `vX.X.X-dev` tag
-- are normal GitHub releases so `/releases/latest` can point to the current DEV release
-- delete older DEV releases and tags
-- verify `/releases/latest`, `version.json`, and EXE download URLs
-- upload `TongYangCustomsPlatform.exe`, `version.json`, and `SHA256.txt`
+Internal RC releases:
+
+- require a `vX.X.X-rc.N` tag
+- are GitHub pre-releases
+- must not become `/releases/latest`
+- are discovered through `config/dev_version.json`
+- upload only `TongYangCustomsPlatform_Setup.exe`, `version.json`, and `SHA256.txt`
 
 Stable releases:
 
-- must not use `-dev`
+- require a `vX.X.X` tag
 - are separate from DEV releases
-- are normal GitHub releases
-- may be marked latest and verified through `/releases/latest`
+- are normal GitHub releases, not pre-releases
+- may be marked Latest and verified through `/releases/latest`
+- upload only `TongYangCustomsPlatform_Setup.exe`, `version.json`, and `SHA256.txt`
 
 ## Parser Architecture
 

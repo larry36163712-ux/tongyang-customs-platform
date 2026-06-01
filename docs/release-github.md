@@ -4,38 +4,58 @@ Repository:
 
 https://github.com/larry36163712-ux/tongyang-customs-platform
 
-## DEV Release Asset Contract
+## Release Asset Contract
 
-The GitHub Release executable asset must be named exactly:
+The GitHub Release installer asset must be named exactly:
 
-`TongYangCustomsPlatform.exe`
+`TongYangCustomsPlatform_Setup.exe`
 
-This only affects the GitHub Release asset filename. UI text, window title, product name, and company name remain `通洋報關平台`.
+The release must also contain:
 
-Do not use generated placeholder names or old executable aliases.
-
-The release manifest must point to the same asset name:
-
-`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform.exe`
-
-## Required Assets
-
-Every DEV release must include:
-
-- `TongYangCustomsPlatform.exe`
 - `version.json`
 - `SHA256.txt`
 
-The upload pipeline must fail if GitHub returns any executable asset name other than `TongYangCustomsPlatform.exe`.
+These three files are the only allowed release assets.
 
-## DEV and Stable Latest Rules
+## Stable Channel
 
-Stable releases are separate from DEV releases.
+Stable releases use tags like:
 
-DEV keeps exactly one active release: `vX.X.X-dev`. The Release Manager updates that release, marks it as latest, uploads the required assets, and deletes older DEV releases/tags such as `DEV-*` and `vX.X.X-dev.N`.
+`v1.1.10`
 
-Stable releases are normal releases, use stable `vX.X.X` tags, and may keep historical versions.
+Stable releases are normal GitHub releases and may be marked as Latest.
 
-Updater discovery must use:
+Stable updater discovery uses:
 
 `https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json`
+
+Stable `version.json` must point `exe_url` and `download_url` to:
+
+`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/TongYangCustomsPlatform_Setup.exe`
+
+## Internal RC Channel
+
+Internal RC releases use tags like:
+
+`v1.1.10-rc.4`
+
+RC releases are GitHub pre-releases and must not become Latest.
+
+Dev/Internal updater discovery uses the repository raw manifest:
+
+`https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json`
+
+`dev_version.json` must point to the tag-specific RC installer:
+
+`https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.4/TongYangCustomsPlatform_Setup.exe`
+
+## Required Verification
+
+Before a release is considered usable:
+
+1. `scripts/release_contract.py --mode published` must pass.
+2. `package_sha256` must match the downloaded setup installer.
+3. Stable release assets must be available through `/releases/latest/download/`.
+4. RC release assets must be available through `/releases/download/<tag>/`.
+5. GitHub API must report RC releases as `prerelease: true`.
+6. GitHub API must report Stable releases as `prerelease: false`.
