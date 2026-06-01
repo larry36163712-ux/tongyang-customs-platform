@@ -33,7 +33,15 @@ CHECK_FIELDS = (
     CanonicalField.INSURANCE,
     CanonicalField.EXCHANGE_RATE,
     CanonicalField.STATISTICAL_METHOD,
+    CanonicalField.DUTY_RATE,
     CanonicalField.DUTY_AMOUNT,
+    CanonicalField.CUSTOMS_VALUE,
+    CanonicalField.TRADE_PROMOTION_FEE,
+    CanonicalField.BUSINESS_TAX,
+    CanonicalField.IMPORT_REGULATION,
+    CanonicalField.MP1,
+    CanonicalField.BSMI,
+    CanonicalField.COMMODITY_INSPECTION,
     CanonicalField.CLOSING_DATE,
 )
 
@@ -44,6 +52,14 @@ HIGH_RISK_FIELDS = {
     CanonicalField.VESSEL_VOYAGE,
     CanonicalField.HS_CODE,
     CanonicalField.EXCHANGE_RATE,
+    CanonicalField.DUTY_RATE,
+    CanonicalField.CUSTOMS_VALUE,
+    CanonicalField.TRADE_PROMOTION_FEE,
+    CanonicalField.BUSINESS_TAX,
+    CanonicalField.IMPORT_REGULATION,
+    CanonicalField.MP1,
+    CanonicalField.BSMI,
+    CanonicalField.COMMODITY_INSPECTION,
 }
 
 OPTIONAL_REPORT_FIELDS = {
@@ -58,7 +74,15 @@ OPTIONAL_REPORT_FIELDS = {
     CanonicalField.INSURANCE,
     CanonicalField.EXCHANGE_RATE,
     CanonicalField.STATISTICAL_METHOD,
+    CanonicalField.DUTY_RATE,
     CanonicalField.DUTY_AMOUNT,
+    CanonicalField.CUSTOMS_VALUE,
+    CanonicalField.TRADE_PROMOTION_FEE,
+    CanonicalField.BUSINESS_TAX,
+    CanonicalField.IMPORT_REGULATION,
+    CanonicalField.MP1,
+    CanonicalField.BSMI,
+    CanonicalField.COMMODITY_INSPECTION,
     CanonicalField.CLOSING_DATE,
 }
 
@@ -92,7 +116,7 @@ class DeclarationDocumentChecker:
         warnings.extend(
             f"{finding.title}: {finding.risk}"
             for finding in validation_findings
-            if finding.risk and finding.status == CheckStatus.MISMATCH
+            if finding.risk and finding.status in {CheckStatus.MISMATCH, CheckStatus.MISSING, CheckStatus.HIGH_RISK}
         )
 
         blocking_results = [
@@ -230,6 +254,9 @@ def _same_value(field: CanonicalField, left: str, right: str) -> bool:
         CanonicalField.INSURANCE,
         CanonicalField.EXCHANGE_RATE,
         CanonicalField.DUTY_AMOUNT,
+        CanonicalField.CUSTOMS_VALUE,
+        CanonicalField.TRADE_PROMOTION_FEE,
+        CanonicalField.BUSINESS_TAX,
     }:
         left_num = _number(left)
         right_num = _number(right)
@@ -277,6 +304,14 @@ def _label(field: CanonicalField) -> str:
         CanonicalField.INSURANCE: "保費",
         CanonicalField.EXCHANGE_RATE: "匯率",
         CanonicalField.STATISTICAL_METHOD: "統計方式",
+        CanonicalField.DUTY_RATE: "稅率",
         CanonicalField.DUTY_AMOUNT: "稅額",
+        CanonicalField.CUSTOMS_VALUE: "完稅價格",
+        CanonicalField.TRADE_PROMOTION_FEE: "推貿費",
+        CanonicalField.BUSINESS_TAX: "營業稅",
+        CanonicalField.IMPORT_REGULATION: "輸入規定",
+        CanonicalField.MP1: "MP1",
+        CanonicalField.BSMI: "BSMI",
+        CanonicalField.COMMODITY_INSPECTION: "商檢",
         CanonicalField.CLOSING_DATE: "結關日",
     }.get(field, field.value)

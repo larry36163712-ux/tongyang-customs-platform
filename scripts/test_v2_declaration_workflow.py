@@ -43,6 +43,21 @@ def main() -> None:
                 "Container No: TGHU1234567",
                 "Seal No: S12345",
                 "Vessel Voyage: YM WELLNESS 123E",
+                "FOB: 10000",
+                "Freight: 1500",
+                "Insurance: 500",
+                "CIF: 12000",
+                "Exchange Rate: 30",
+                "Customs Value: 360000",
+                "Duty Rate: 5%",
+                "Duty Amount: 18000",
+                "Trade Promotion Fee: 144",
+                "Business Tax: 18907",
+                "Statistical Method: 02",
+                "Import Regulation: MP1",
+                "MP1: Y",
+                "BSMI: N",
+                "Commodity Inspection: N",
             ]
         ),
     )
@@ -121,4 +136,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

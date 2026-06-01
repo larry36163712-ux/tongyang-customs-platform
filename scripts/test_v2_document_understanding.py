@@ -145,6 +145,23 @@ def main() -> None:
     if filename_trap.document_type != DocumentType.PACKING_LIST:
         raise RuntimeError("classification must not trust misleading filenames")
     classifier = SemanticDocumentClassifier()
+    invoice_ds2_trap = classifier.classify(
+        "\n".join(
+            [
+                "Commercial Invoice",
+                "Invoice No: IV-DS2-TRAP",
+                "Seller: TEST SUPPLIER",
+                "Buyer: TEST BUYER",
+                "FOB USD 1000",
+                "CIF USD 1200",
+                "Total Amount USD 1200",
+            ]
+        ),
+        "invoice-page-2.pdf",
+    )
+    ds2_trap = next((item for item in invoice_ds2_trap if item.document_type == DocumentType.DS2_DECLARATION), None)
+    if ds2_trap and ds2_trap.confidence >= 0.30:
+        raise RuntimeError(f"invoice subpage should not become low-confidence DS2 candidate: {ds2_trap}")
     full_bl = classifier.best(full_bl_text, "arrival_notice.pdf")
     if full_bl.document_type != DocumentType.BILL_OF_LADING or full_bl.confidence < 0.85:
         raise RuntimeError(f"B/L fingerprint failed: {full_bl}")

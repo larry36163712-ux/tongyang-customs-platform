@@ -67,6 +67,7 @@ class CanonicalField(str, Enum):
     INSURANCE = "insurance"
     EXCHANGE_RATE = "exchange_rate"
     STATISTICAL_METHOD = "statistical_method"
+    DUTY_RATE = "duty_rate"
     DUTY_AMOUNT = "duty_amount"
     CUSTOMS_VALUE = "customs_value"
     TRADE_PROMOTION_FEE = "trade_promotion_fee"

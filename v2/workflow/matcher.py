@@ -27,6 +27,7 @@ KEY_WEIGHTS = {
     "container_no": 0.9,
     "container_suffix": 0.72,
     "vessel_voyage": 0.7,
+    "eta": 0.5,
     "amount": 0.55,
     "date": 0.45,
     "consignee": 0.35,
@@ -118,6 +119,7 @@ class WorkflowMatcher:
             "shipping_order_no": self._first_match(normalized_text, r"\b(?:s/o|so|shipping order)\s*(?:no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9\-\/]+)"),
             "container_no": self._first_match(normalized_text, r"\b([A-Z]{4}\s*\d{7})\b"),
             "vessel_voyage": self._first_match(normalized_text, r"\b(?:vessel\s*/\s*voyage|vessel voyage|vsl\s*/?\s*voy)\s*[:\-]?\s*([A-Z0-9 .\-\/]+)"),
+            "eta": self._first_match(normalized_text, r"\b(?:eta|arrival date|到港日)\s*[:\-]?\s*(20\d{2}[-/]\d{1,2}[-/]\d{1,2})"),
             "date": self._first_match(normalized_text, r"\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2})\b"),
         }
         text_vessel = self._vessel_voyage_from_text(normalized_text)
@@ -136,6 +138,7 @@ class WorkflowMatcher:
             keys["shipping_order_no"] = keys.get("shipping_order_no") or self._field(document, CanonicalField.SHIPPING_ORDER_NO)
             parsed_vessel = self._field(document, CanonicalField.VESSEL_VOYAGE) or self._field(document, CanonicalField.VOYAGE)
             keys["vessel_voyage"] = keys.get("vessel_voyage") or parsed_vessel
+            keys["eta"] = keys.get("eta") or self._field(document, CanonicalField.ETA)
             keys["container_no"] = keys.get("container_no") or self._field(document, CanonicalField.CONTAINER_NO)
             keys["container_suffix"] = keys.get("container_suffix") or self._container_suffix(keys.get("container_no", ""))
         normalized = {key: _normalize_key(key, value) for key, value in keys.items() if value}
@@ -201,6 +204,8 @@ class WorkflowMatcher:
             left_value = left.get(key, "")
             right_value = right.get(key, "")
             if left_value and right_value and _key_similarity(left_value, right_value) < 0.72:
+                if key == "container_no" and self._context_similarity(left, right, "container_suffix", 0.92):
+                    continue
                 return True
         for key in ("consignee", "shipper"):
             left_value = left.get(key, "")
@@ -224,9 +229,11 @@ class WorkflowMatcher:
             return False
         container_overlap = self._context_similarity(left, right, "container_no", 0.72) or self._context_similarity(left, right, "container_suffix", 0.92)
         vessel_overlap = self._context_similarity(left, right, "vessel_voyage", 0.78)
+        eta_overlap = self._context_similarity(left, right, "eta", 0.86) or self._context_similarity(left, right, "date", 0.86)
         party_overlap = self._context_similarity(left, right, "consignee", 0.62) or self._context_similarity(left, right, "shipper", 0.62)
         reference_overlap = any(self._context_similarity(left, right, key, 0.72) for key in ("booking_no", "bl_no", "invoice_no"))
-        return bool(reference_overlap or container_overlap or (vessel_overlap and (container_overlap or party_overlap)))
+        same_source_hint = self._source_customer_hint(left_segment) and self._source_customer_hint(left_segment) == self._source_customer_hint(right_segment)
+        return bool(reference_overlap or container_overlap or (vessel_overlap and (container_overlap or party_overlap or eta_overlap or same_source_hint)))
 
     def _context_similarity(self, left: dict[str, str], right: dict[str, str], key: str, threshold: float) -> bool:
         left_value = left.get(key, "")
@@ -252,6 +259,7 @@ class WorkflowMatcher:
             "consignee",
             "shipper",
             "vessel_voyage",
+            "eta",
             "date",
         )
         return not any(left.get(key) and right.get(key) for key in context_keys)

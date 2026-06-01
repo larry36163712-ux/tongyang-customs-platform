@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 )
 
 from engine.report import AuditReportEngine, SectionController
+from v2.audit.feedback import AuditFeedback, AuditFeedbackEngine
 from v2.core.backtesting import BacktestAnalyticsService
 from v2.core.checking import DeclarationDocumentChecker
 from v2.core.document_loader import DocumentLoader, LoadedDocument
@@ -87,8 +88,8 @@ DOCUMENT_LABELS = {
 STATUS_LABELS = {
     CheckStatus.MATCH: "一致",
     CheckStatus.MISMATCH: "不一致",
-    CheckStatus.MISSING: "缺少欄位",
-    CheckStatus.HIGH_RISK: "高風險",
+    CheckStatus.MISSING: "缺失",
+    CheckStatus.HIGH_RISK: "待人工確認",
 }
 
 FIELD_LABELS = {
@@ -120,7 +121,15 @@ FIELD_LABELS = {
     "insurance": "保費",
     "exchange_rate": "匯率",
     "statistical_method": "統計方式",
+    "duty_rate": "稅率",
     "duty_amount": "稅額",
+    "customs_value": "完稅價格",
+    "trade_promotion_fee": "推貿費",
+    "business_tax": "營業稅",
+    "import_regulation": "輸入規定",
+    "mp1": "MP1",
+    "bsmi": "BSMI",
+    "commodity_inspection": "商檢",
     "closing_date": "結關日",
 }
 
@@ -483,7 +492,7 @@ class WorkflowRunWorker(QObject):
 class CustomsErpWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("通洋報關平台")
+        self.setWindowTitle("報關案件工作台")
         self.resize(1480, 920)
         self.setMinimumSize(1180, 760)
 
@@ -492,6 +501,7 @@ class CustomsErpWindow(QMainWindow):
         self.loader = DocumentLoader(self.parser)
         self.checker = DeclarationDocumentChecker(self.parser)
         self.audit_report_engine = AuditReportEngine()
+        self.feedback_engine = AuditFeedbackEngine()
         self.section_controller = SectionController()
         self.templates = CustomerTemplateLearningService()
         self.analytics = BacktestAnalyticsService(self.templates)
@@ -593,7 +603,7 @@ class CustomsErpWindow(QMainWindow):
         sidebar_layout.setContentsMargins(22, 26, 18, 22)
         sidebar_layout.setSpacing(18)
 
-        brand = QLabel("通洋報關平台")
+        brand = QLabel("報關案件工作台")
         brand.setObjectName("Brand")
         sidebar_layout.addWidget(brand)
         sidebar_layout.addSpacing(8)
@@ -807,6 +817,31 @@ class CustomsErpWindow(QMainWindow):
         right_title.setObjectName("PanelTitle")
         summary_layout.addWidget(right_title)
         summary_layout.addWidget(audit_summary)
+
+        feedback_panel = QFrame()
+        feedback_panel.setObjectName("FeedbackPanel")
+        feedback_layout = QVBoxLayout(feedback_panel)
+        feedback_layout.setContentsMargins(10, 8, 10, 8)
+        feedback_layout.setSpacing(6)
+        feedback_title = QLabel("這次核對結果是否正確？")
+        feedback_title.setObjectName("PanelTitle")
+        feedback_actions = QHBoxLayout()
+        feedback_correct = QPushButton("✓ 正確")
+        feedback_correct.setObjectName("SecondaryButton")
+        feedback_issue = QPushButton("✗ 有問題")
+        feedback_issue.setObjectName("SecondaryButton")
+        feedback_correct.clicked.connect(lambda _checked=False, view=view_name: self._record_audit_feedback(view, True))
+        feedback_issue.clicked.connect(lambda _checked=False, view=view_name: self._open_feedback_dialog(view))
+        feedback_actions.addWidget(feedback_correct)
+        feedback_actions.addWidget(feedback_issue)
+        feedback_actions.addStretch(1)
+        feedback_stats = QLabel("最近 100 票：尚無回饋資料")
+        feedback_stats.setObjectName("SidebarNote")
+        feedback_stats.setWordWrap(True)
+        feedback_layout.addWidget(feedback_title)
+        feedback_layout.addLayout(feedback_actions)
+        feedback_layout.addWidget(feedback_stats)
+        summary_layout.addWidget(feedback_panel)
         summary_layout.addWidget(debug_toggle)
         summary_layout.addWidget(self.workflow_debug)
         center.addWidget(risk_panel, 0)
@@ -825,6 +860,7 @@ class CustomsErpWindow(QMainWindow):
             "table": compare_table,
             "audit_report": audit_report_view,
             "summary": audit_summary,
+            "feedback_stats": feedback_stats,
             "audit_status_label": status_label,
             "document_status_bar": document_status_bar,
             "document_status_layout": document_status_layout,
@@ -1316,6 +1352,7 @@ class CustomsErpWindow(QMainWindow):
             summary.setText(self._format_audit_summary_card(case))
         if isinstance(debug, QTextEdit):
             debug.setText(self._format_case_debug(case))
+        self._refresh_feedback_stats_label(view_name)
 
     def _render_workflow_result_without_case(self, result: WorkflowResult, view_name: str = "case") -> None:
         view = self.workflow_views.get(view_name, {})
@@ -1339,6 +1376,133 @@ class CustomsErpWindow(QMainWindow):
                 summary.setText("\n".join(f"⚠ 缺少 {name}" for name in missing))
             else:
                 summary.setText("⚠ 尚未建立可核對案件，請確認文件是否含 INV / PL / B/L / DS2 或 SO 關鍵資料。")
+        self._refresh_feedback_stats_label(view_name)
+
+    def _record_audit_feedback(
+        self,
+        view_name: str,
+        is_correct: bool,
+        error_types: list[str] | None = None,
+        corrected_result: str = "",
+        note: str = "",
+    ) -> None:
+        case = self.current_workflow_cases.get(view_name)
+        if not case:
+            QMessageBox.information(self, "尚未產生案件", "目前尚未有可回饋的核對案件。")
+            return
+        selected_types = error_types or (["正確"] if is_correct else ["其他"])
+        predicted_result = self._feedback_predicted_result(case)
+        source_file = self._feedback_source_files(case)
+        for error_type in selected_types:
+            self.feedback_engine.record(
+                AuditFeedback(
+                    case_id=case.case_id,
+                    source_file=source_file,
+                    predicted_result=predicted_result,
+                    corrected_result=corrected_result,
+                    error_type=error_type,
+                    note=note,
+                    is_correct=is_correct,
+                )
+            )
+        self._refresh_feedback_stats_label(view_name)
+        QMessageBox.information(self, "已記錄回饋", "核對回饋已寫入 feedback.db，後續可用於統計與規則調整。")
+
+    def _open_feedback_dialog(self, view_name: str) -> None:
+        case = self.current_workflow_cases.get(view_name)
+        if not case:
+            QMessageBox.information(self, "尚未產生案件", "目前尚未有可回饋的核對案件。")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("核對回饋")
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(10)
+        title = QLabel("請勾選本次核對需要修正的項目")
+        title.setObjectName("PanelTitle")
+        layout.addWidget(title)
+
+        error_types = [
+            "文件分類錯誤",
+            "DS2 誤判",
+            "品名錯誤",
+            "稅則錯誤",
+            "件數錯誤",
+            "重量錯誤",
+            "船名航次錯誤",
+            "CIF / FOB 錯誤",
+            "運保費錯誤",
+            "MP1",
+            "BSMI",
+            "商檢",
+            "其他",
+        ]
+        checks: list[QCheckBox] = []
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(8)
+        for index, label in enumerate(error_types):
+            check = QCheckBox(label)
+            checks.append(check)
+            grid.addWidget(check, index // 2, index % 2)
+        layout.addLayout(grid)
+
+        corrected = QTextEdit()
+        corrected.setObjectName("AuditReportView")
+        corrected.setPlaceholderText("正確答案，例如：報單件數應為 97 BALES，稅則應為 4707.20。")
+        corrected.setMinimumHeight(82)
+        layout.addWidget(QLabel("正確答案"))
+        layout.addWidget(corrected)
+
+        note = QTextEdit()
+        note.setObjectName("AuditReportView")
+        note.setPlaceholderText("補充說明，例如：掃描件欄位切分不完整，需人工確認報單表身。")
+        note.setMinimumHeight(82)
+        layout.addWidget(QLabel("補充說明"))
+        layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = [check.text() for check in checks if check.isChecked()]
+        if not selected:
+            QMessageBox.warning(self, "尚未選擇錯誤類型", "請至少選擇一個錯誤類型。")
+            return
+        self._record_audit_feedback(
+            view_name,
+            False,
+            error_types=selected,
+            corrected_result=corrected.toPlainText(),
+            note=note.toPlainText(),
+        )
+
+    def _refresh_feedback_stats_label(self, view_name: str | None = None) -> None:
+        stats = self.feedback_engine.statistics(limit=100)
+        if stats.total == 0:
+            text = "最近 100 票：尚無回饋資料"
+        elif stats.error_counts:
+            top = "、".join(f"{name} {count}" for name, count in list(stats.error_counts.items())[:5])
+            text = f"最近 100 票：正確 {stats.correct_count}，需修正 {stats.issue_count}（{top}）"
+        else:
+            text = f"最近 100 票：正確 {stats.correct_count}，尚無問題回饋"
+        targets = [view_name] if view_name else list(self.workflow_views)
+        for name in targets:
+            label = self.workflow_views.get(name, {}).get("feedback_stats")
+            if isinstance(label, QLabel):
+                label.setText(text)
+
+    def _feedback_predicted_result(self, case: CaseWorkflow) -> str:
+        status = self._audit_status_badge(case)
+        summary = self._format_case_workspace_summary(case).strip()
+        risks = self._format_risk_summary(case).strip()
+        return "\n\n".join(part for part in [status, summary, risks] if part)[:4000]
+
+    def _feedback_source_files(self, case: CaseWorkflow) -> str:
+        names = list(dict.fromkeys(segment.source_name for segment in case.documents if segment.source_name))
+        return "、".join(names)[:1000]
 
     def _format_intake_report(self, result: WorkflowResult) -> str:
         lines = [
@@ -1704,9 +1868,9 @@ class CustomsErpWindow(QMainWindow):
                 if result.status == CheckStatus.MISMATCH:
                     lines.append(f"✗ {FIELD_LABELS.get(result.field.value, result.field.value)} 不一致")
                 elif result.status == CheckStatus.MISSING:
-                    lines.append(f"✗ {FIELD_LABELS.get(result.field.value, result.field.value)} 資料不足")
+                    lines.append(f"✗ {FIELD_LABELS.get(result.field.value, result.field.value)} 缺失")
                 elif result.status == CheckStatus.HIGH_RISK:
-                    lines.append(f"⚠ {FIELD_LABELS.get(result.field.value, result.field.value)} 高風險")
+                    lines.append(f"⚠ {FIELD_LABELS.get(result.field.value, result.field.value)} 待人工確認")
             lines.extend(f"⚠ {self._humanize_warning(warning)}" for warning in case.audit_report.high_risk_warnings)
         lines.extend(f"⚠ {self._humanize_warning(finding)}" for finding in case.rule_findings)
         if not lines:
@@ -2036,13 +2200,13 @@ class CustomsErpWindow(QMainWindow):
             CheckStatus.MATCH: "#D9F2E3",
             CheckStatus.MISSING: "#FFF3CD",
             CheckStatus.MISMATCH: "#F8D7DA",
-            CheckStatus.HIGH_RISK: "#F8D7DA",
+            CheckStatus.HIGH_RISK: "#FFF3CD",
         }
         label_by_status = {
             CheckStatus.MATCH: "✓ 一致",
-            CheckStatus.MISSING: "⚠ 無法確認",
+            CheckStatus.MISSING: "✗ 缺失",
             CheckStatus.MISMATCH: "✗ 不一致",
-            CheckStatus.HIGH_RISK: "⚠ 高風險",
+            CheckStatus.HIGH_RISK: "⚠ 待人工確認",
         }
         for row, result in enumerate(results):
             by_type = self._document_values_for_field(case, result.field)
@@ -2057,12 +2221,12 @@ class CustomsErpWindow(QMainWindow):
             status_item = table.item(row, table.columnCount() - 1)
             status_item.setToolTip(result.status.value)
             status_item.setBackground(QBrush(QColor(color_by_status.get(result.status, "#1B2530"))))
-            if result.status in {CheckStatus.MISMATCH, CheckStatus.HIGH_RISK}:
+            if result.status == CheckStatus.MISMATCH:
                 for col in range(table.columnCount()):
                     cell = table.item(row, col)
                     if cell:
                         cell.setBackground(QBrush(QColor("#F8D7DA")))
-            elif result.status == CheckStatus.MISSING:
+            elif result.status in {CheckStatus.MISSING, CheckStatus.HIGH_RISK}:
                 for col in range(table.columnCount()):
                     cell = table.item(row, col)
                     if cell:
@@ -2824,7 +2988,7 @@ class CustomsErpWindow(QMainWindow):
                             f"  action: {item.get('action', '-')}"
                         )
             else:
-                shortcut_lines.append("- 找不到 TongYang/通洋/Customs/報關 桌面捷徑")
+                shortcut_lines.append("- 找不到相關桌面捷徑")
             lines = [
                 "Updater Debug Panel",
                 "",
@@ -3082,7 +3246,7 @@ class CustomsErpWindow(QMainWindow):
                 background: #1B2530;
                 width: 8px;
             }
-            #WorkflowSidebar, #AuditWorkspace, #AuditSummaryPanel {
+            #WorkflowSidebar, #AuditWorkspace, #AuditSummaryPanel, #FeedbackPanel {
                 background: transparent;
             }
             #AuditSummaryCard {
@@ -3382,7 +3546,7 @@ class CustomsErpWindow(QMainWindow):
                 font-size: 15px;
                 font-weight: 700;
             }
-            #WorkflowUpload, #AuditSidePanel, #AuditWorkspace, #AuditSummaryPanel {
+            #WorkflowUpload, #AuditSidePanel, #AuditWorkspace, #AuditSummaryPanel, #FeedbackPanel {
                 background: #FFFFFF;
                 border: 1px solid #D8DEE6;
                 border-radius: 8px;
@@ -3516,7 +3680,7 @@ class CustomsErpWindow(QMainWindow):
                 background: #D8DEE6;
                 width: 7px;
             }
-            #AuditSidePanel, #AuditWorkspace, #AuditSummaryPanel {
+            #AuditSidePanel, #AuditWorkspace, #AuditSummaryPanel, #FeedbackPanel {
                 background: #FFFFFF;
                 border: 1px solid #D8DEE6;
                 border-radius: 8px;

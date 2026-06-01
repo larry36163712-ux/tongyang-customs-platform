@@ -24,6 +24,7 @@ def main() -> None:
     invoice = root / "invoice.txt"
     packing = root / "packing.txt"
     arrival = root / "arrival_notice.txt"
+    manifest = root / "manifest.txt"
     declaration = root / "ds2.txt"
 
     _write(
@@ -72,6 +73,20 @@ def main() -> None:
         ],
     )
     _write(
+        manifest,
+        [
+            "Cargo Manifest",
+            "Manifest No: MF-CASE-001",
+            "B/L No: BL-CASE-001",
+            "Vessel Voyage: WAN HAI 293",
+            "Container No: TLLU1234567",
+            "Seal No: SEAL123",
+            "Package: 97 BALES",
+            "Gross Weight: 99,270 KGS",
+            "Description: WOODEN CHAIR",
+        ],
+    )
+    _write(
         declaration,
         [
             "海關進口報單 DS2",
@@ -96,7 +111,7 @@ def main() -> None:
     )
 
     engine = DocumentWorkflowEngine(cache_root=root / "cache", rules_path=Path("config/customs_rules.json"))
-    result = engine.process_paths([str(invoice), str(packing), str(arrival), str(declaration)])
+    result = engine.process_paths([str(invoice), str(packing), str(arrival), str(manifest), str(declaration)])
     if not result.cases:
         raise RuntimeError("case organizer test produced no workflow case")
 
@@ -110,6 +125,8 @@ def main() -> None:
         raise RuntimeError("cargo summary was empty")
     if not organizer.customs_summary:
         raise RuntimeError("customs summary was empty")
+    if not organizer.manifest_summary:
+        raise RuntimeError("manifest summary was empty")
 
     report = organizer.human_text()
     detailed_report = organizer.human_text(detail=True)
@@ -120,6 +137,10 @@ def main() -> None:
     for phrase in ["97 BALES", "PCE 視為 PCS", "推貿費", "營業稅", "輸入規定", "MP1", "BSMI", "商檢"]:
         if phrase not in report:
             raise RuntimeError(f"case organizer report missing customs phrase: {phrase}")
+    if "艙單佐證" not in report:
+        raise RuntimeError("case organizer report missing manifest evidence section")
+    if "艙單已提供" not in report:
+        raise RuntimeError("case organizer report missing manifest risk note")
     for forbidden in ["bl_no: exact", "invoice_no", "declaration_no", "closing_date", "WARNING_GLOBAL", "parser"]:
         if forbidden in report:
             raise RuntimeError(f"case organizer report leaked internal wording: {forbidden}")

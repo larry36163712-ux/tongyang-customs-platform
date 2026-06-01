@@ -59,7 +59,7 @@ class SemanticDocumentClassifier:
     PROFILES: tuple[DocumentSemanticProfile, ...] = (
         DocumentSemanticProfile(
             DocumentType.DS2_DECLARATION,
-            layout_terms=("進口報單", "海關進口報單", "報單", "import declaration", "declaration", "ds2"),
+            layout_terms=("進口報單", "海關進口報單", "外貨進口", "報單", "import declaration", "declaration", "ds2"),
             semantic_fields=(
                 "報單號碼",
                 "進口人",
@@ -68,6 +68,7 @@ class SemanticDocumentClassifier:
                 "稅則",
                 "統計方式",
                 "完稅價格",
+                "離岸價格",
                 "稅率",
                 "稅額",
                 "推貿費",
@@ -83,7 +84,7 @@ class SemanticDocumentClassifier:
                 "duty amount",
                 "exchange rate",
             ),
-            customs_vocabulary=("海關", "進口", "報單", "稅則", "完稅", "統計", "稅額", "納稅", "申報"),
+            customs_vocabulary=("海關", "進口", "外貨進口", "報單", "稅則", "完稅", "離岸價格", "統計", "稅額", "納稅", "申報"),
             table_patterns=("項次", "稅則", "貨名", "完稅價格", "統計方式", "稅率", "稅額", "毛重", "淨重"),
             trade_fingerprint=("cif", "fob", "運費", "保費", "匯率", "納稅辦法", "通關方式"),
             identifier_patterns=(
@@ -258,6 +259,14 @@ class SemanticDocumentClassifier:
         arrival = by_type.get(DocumentType.ARRIVAL_NOTICE)
         delivery = by_type.get(DocumentType.DELIVERY_ORDER)
         manifest = by_type.get(DocumentType.MANIFEST)
+        ds2 = by_type.get(DocumentType.DS2_DECLARATION)
+        invoice = by_type.get(DocumentType.INVOICE)
+        if ds2 and not self._has_ds2_identity(normalized):
+            ds2_group_hits, _term_hits = self._ds2_support_groups(structure)
+            if invoice and ds2_group_hits < 2:
+                self._adjust_candidate(ds2, -0.55, "INV 子頁缺少報單強特徵，降低 DS2 誤判")
+            elif ds2_group_hits < 2:
+                self._adjust_candidate(ds2, -0.12, "DS2 強特徵不足，僅保留真正報單候選")
         if arrival and self._has_arrival_identity(normalized) and bl and not self._has_strong_bl_identity(normalized):
             self._adjust_candidate(arrival, 0.12, "到貨通知強特徵")
             self._adjust_candidate(bl, -0.08, "到貨通知與 B/L 邊界校正")
@@ -276,7 +285,7 @@ class SemanticDocumentClassifier:
             elif bl:
                 self._adjust_candidate(bl, -0.12, "艙單號碼優先於 B/L 佐證文字")
 
-        return candidates
+        return [candidate for candidate in candidates if candidate.document_type != DocumentType.DS2_DECLARATION or candidate.confidence >= 0.30]
 
     def _adjust_candidate(self, candidate: DocumentCandidate, delta: float, reason: str) -> None:
         candidate.confidence = round(min(0.98, max(0.0, candidate.confidence + delta)), 2)
@@ -320,13 +329,17 @@ class SemanticDocumentClassifier:
             or "海運艙單" in text
         )
 
+    def _has_ds2_identity(self, text: str) -> bool:
+        identity_terms = ("進口報單", "海關進口報單", "外貨進口", "報單號碼", "ds2 declaration", "ds2 報單", "import declaration")
+        return any(self._normalize(term) in text for term in identity_terms)
+
     def _cap_ds2_sparse_confidence(self, structure: OCRStructure, confidence: float) -> float:
-        identity_terms = ("進口報單", "海關進口報單", "報單號碼", "ds2", "import declaration")
-        has_identity = any(self._normalize(term) in structure.normalized for term in identity_terms)
+        has_identity = self._has_ds2_identity(structure.normalized)
         field_terms = (
             "稅則",
             "統計方式",
             "完稅價格",
+            "離岸價格",
             "cif",
             "fob",
             "稅率",
@@ -406,15 +419,25 @@ class SemanticDocumentClassifier:
             return 0.12
         if evidence_count >= 2 and structure.numeric_ratio >= 0.10:
             return 0.10
-        core_terms = ("稅則", "統計方式", "完稅價格", "報單", "進口報單", "海關進口報單", "CIF", "FOB", "稅率", "稅額", "推貿費")
+        core_terms = ("稅則", "統計方式", "完稅價格", "離岸價格", "外貨進口", "報單", "進口報單", "海關進口報單", "CIF", "FOB", "稅率", "稅額", "推貿費")
         if any(self._normalize(term) in structure.normalized for term in core_terms):
             return 0.18
         return 0.0
 
     def _ds2_customs_group_score(self, structure: OCRStructure) -> float:
+        group_hits, term_hits = self._ds2_support_groups(structure)
+        if group_hits >= 3:
+            return 0.24
+        if group_hits >= 2:
+            return 0.20
+        if term_hits >= 3 and structure.numeric_ratio >= 0.08:
+            return 0.10
+        return 0.0
+
+    def _ds2_support_groups(self, structure: OCRStructure) -> tuple[int, int]:
         groups = {
-            "declaration_identity": ("進口報單", "海關進口報單", "報單號碼", "報單", "ds2", "import declaration"),
-            "tax_value": ("稅則", "完稅價格", "cif", "fob", "稅率", "稅額", "推貿費"),
+            "declaration_identity": ("進口報單", "海關進口報單", "外貨進口", "報單號碼", "報單", "ds2 declaration", "ds2 報單", "import declaration"),
+            "tax_value": ("稅則", "完稅價格", "離岸價格", "cif", "fob", "稅率", "稅額", "推貿費"),
             "declaration_body": ("統計方式", "船名航次", "件數", "毛重", "淨重", "納稅義務人", "進口人"),
         }
         group_hits = 0
@@ -424,13 +447,7 @@ class SemanticDocumentClassifier:
             if hits:
                 group_hits += 1
                 term_hits += len(hits)
-        if group_hits >= 3:
-            return 0.24
-        if group_hits >= 2:
-            return 0.20
-        if term_hits >= 2 and structure.numeric_ratio >= 0.08:
-            return 0.16
-        return 0.0
+        return group_hits, term_hits
 
     def _filename_hints(self, document_type: DocumentType, filename: str) -> float:
         normalized = self._normalize(filename)

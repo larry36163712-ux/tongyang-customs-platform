@@ -51,7 +51,7 @@ def _run_runtime_self_test(output_path: str) -> int:
         sample = QWidget()
         layout = QVBoxLayout(sample)
         sample_texts = [
-            "通洋報關平台",
+            "報關案件工作台",
             "案件工作流",
             "進口核對",
             "出口核對",
@@ -129,8 +129,8 @@ def main() -> int:
     )
 
     app = QApplication(sys.argv)
-    app.setApplicationName("通洋報關平台")
-    app.setOrganizationName("Tong Yang")
+    app.setApplicationName("報關案件工作台")
+    app.setOrganizationName("Customs ERP")
     try:
         from v2.ui.fonts import install_cjk_font
 

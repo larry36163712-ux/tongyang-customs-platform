@@ -53,6 +53,7 @@ class SemanticParserEngine:
         SemanticAlias(CanonicalField.INSURANCE, ("insurance", "ins", "保費", "保險費")),
         SemanticAlias(CanonicalField.EXCHANGE_RATE, ("exchange rate", "ex rate", "rate", "匯率")),
         SemanticAlias(CanonicalField.STATISTICAL_METHOD, ("statistical method", "stat method", "統計方式", "統計單位")),
+        SemanticAlias(CanonicalField.DUTY_RATE, ("duty rate", "tax rate", "tariff rate", "稅率")),
         SemanticAlias(CanonicalField.DUTY_AMOUNT, ("duty", "tax", "duty amount", "稅額", "進口稅")),
         SemanticAlias(CanonicalField.CUSTOMS_VALUE, ("customs value", "dutiable value", "完稅價格", "完稅價值", "海關完稅價格")),
         SemanticAlias(CanonicalField.TRADE_PROMOTION_FEE, ("trade promotion fee", "推貿費", "推廣貿易服務費")),
@@ -134,9 +135,21 @@ class SemanticParserEngine:
 
     def map_label(self, label: str) -> CanonicalField | None:
         normalized = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", label).strip().casefold()
+        exact_matches: list[tuple[int, CanonicalField]] = []
+        partial_matches: list[tuple[int, CanonicalField]] = []
         for alias in self.FIELD_ALIASES:
-            if any(term.casefold() == normalized or term.casefold() in normalized for term in alias.aliases):
-                return alias.canonical
+            for term in alias.aliases:
+                needle = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", " ", term).strip().casefold()
+                if not needle:
+                    continue
+                if needle == normalized:
+                    exact_matches.append((len(needle), alias.canonical))
+                elif needle in normalized:
+                    partial_matches.append((len(needle), alias.canonical))
+        if exact_matches:
+            return max(exact_matches, key=lambda item: item[0])[1]
+        if partial_matches:
+            return max(partial_matches, key=lambda item: item[0])[1]
         return None
 
     def parse_document(self, text: str, customer: str = "", supplier: str = "", source_name: str = "") -> ParsedDocument:

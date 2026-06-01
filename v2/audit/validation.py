@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from v2.audit.normalization import SemanticNormalizationEngine
+from v2.audit.taiwan_rules import TaiwanCustomsAuditRulesEngine
 from v2.core.models import CanonicalField, CheckResult, CheckStatus, ParsedDocument
 
 
@@ -21,6 +22,7 @@ class AuditValidationEngine:
 
     def __init__(self, normalizer: SemanticNormalizationEngine | None = None) -> None:
         self.normalizer = normalizer or SemanticNormalizationEngine()
+        self.taiwan_rules = TaiwanCustomsAuditRulesEngine(self.normalizer)
 
     def validate(self, declaration: ParsedDocument | None, documents: list[ParsedDocument], results: list[CheckResult]) -> list[ValidationFinding]:
         findings = [
@@ -32,7 +34,18 @@ class AuditValidationEngine:
             self.hs_code_validation(results),
             self.statistics_validation(declaration, documents),
         ]
-        return [finding for finding in findings if finding is not None]
+        formal_findings = [finding for finding in findings if finding is not None]
+        formal_findings.extend(
+            ValidationFinding(
+                finding.title,
+                finding.status,
+                finding.process,
+                finding.explanation,
+                finding.risk,
+            )
+            for finding in self.taiwan_rules.evaluate(declaration, documents)
+        )
+        return formal_findings
 
     def cif_validation(self, declaration: ParsedDocument | None, documents: list[ParsedDocument]) -> ValidationFinding | None:
         fob = self._first_number(CanonicalField.FOB, declaration, documents)

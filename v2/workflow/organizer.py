@@ -46,6 +46,7 @@ FIELD_LABELS = {
     CanonicalField.INSURANCE: "保費",
     CanonicalField.CURRENCY: "幣別",
     CanonicalField.EXCHANGE_RATE: "匯率",
+    CanonicalField.DUTY_RATE: "稅率",
     CanonicalField.DUTY_AMOUNT: "稅額",
     CanonicalField.CUSTOMS_VALUE: "完稅價格",
     CanonicalField.TRADE_PROMOTION_FEE: "推貿費",
@@ -95,6 +96,7 @@ class CustomsCaseOrganizerResult:
     case_id: str
     grouping_confidence: str
     shipment_summary: list[OrganizerField] = field(default_factory=list)
+    manifest_summary: list[OrganizerField] = field(default_factory=list)
     cargo_summary: list[OrganizerField] = field(default_factory=list)
     customs_summary: list[OrganizerField] = field(default_factory=list)
     audit_summary: list[str] = field(default_factory=list)
@@ -113,6 +115,8 @@ class CustomsCaseOrganizerResult:
         ]
         lines.extend(f"- {item}" for item in (self.missing_documents or ["必要文件未發現明確缺口。"]))
         lines.extend(self._section("三、船務資料", self.shipment_summary, detail))
+        if self.manifest_summary:
+            lines.extend(self._section("三之一、艙單佐證", self.manifest_summary, detail))
         lines.extend(self._section("四、貨物資料", self.cargo_summary, detail))
         lines.extend(self._section("五、金額 / 報關資料", self.customs_summary, detail))
         lines.extend(["", "六、核對摘要"])
@@ -339,6 +343,7 @@ class ShipmentGroupingEngine:
 class CustomsSummaryBuilder:
     def __init__(self) -> None:
         self.mapper = SemanticFieldMapper()
+        self.classifier = CustomsDocumentClassifier()
 
     def build_shipment_summary(self, case: CaseWorkflow) -> list[OrganizerField]:
         values = self.mapper.values_by_field(case)
@@ -379,6 +384,48 @@ class CustomsSummaryBuilder:
             case.match_keys,
         )
 
+    def build_manifest_summary(self, case: CaseWorkflow) -> list[OrganizerField]:
+        fields = [
+            CanonicalField.VESSEL_VOYAGE,
+            CanonicalField.VESSEL,
+            CanonicalField.VOYAGE,
+            CanonicalField.BL_NO,
+            CanonicalField.CONTAINER_NO,
+            CanonicalField.SEAL_NO,
+            CanonicalField.POL,
+            CanonicalField.POD,
+            CanonicalField.PORT,
+            CanonicalField.PACKAGE_COUNT,
+            CanonicalField.GROSS_WEIGHT,
+            CanonicalField.CBM,
+            CanonicalField.DESCRIPTION,
+        ]
+        items: list[OrganizerField] = []
+        seen: set[tuple[str, str]] = set()
+        for segment in case.documents:
+            if self.classifier.effective_type(segment) != DocumentType.MANIFEST or not segment.parsed:
+                continue
+            for parsed in segment.parsed.fields:
+                if parsed.canonical not in fields:
+                    continue
+                value, note = self.mapper.dictionary.normalize(parsed.canonical, str(parsed.value))
+                if not value:
+                    continue
+                key = (parsed.canonical.value, value)
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append(
+                    OrganizerField(
+                        FIELD_LABELS.get(parsed.canonical, parsed.canonical.value),
+                        value,
+                        [segment.source_name],
+                        parsed.confidence,
+                        note,
+                    )
+                )
+        return items
+
     def build_customs_summary(self, case: CaseWorkflow) -> list[OrganizerField]:
         values = self.mapper.values_by_field(case)
         return self._fields(
@@ -391,6 +438,7 @@ class CustomsSummaryBuilder:
                 CanonicalField.INSURANCE,
                 CanonicalField.CURRENCY,
                 CanonicalField.EXCHANGE_RATE,
+                CanonicalField.DUTY_RATE,
                 CanonicalField.DUTY_AMOUNT,
                 CanonicalField.TRADE_PROMOTION_FEE,
                 CanonicalField.BUSINESS_TAX,
@@ -539,6 +587,10 @@ class RiskAnalysisEngine:
                 elif result.status == CheckStatus.MISSING and result.field not in self.OPTIONAL_FIELDS:
                     label = FIELD_LABELS.get(result.field, result.field.value)
                     errors.append(f"{label} 缺少可核對資料。")
+            for finding in getattr(case.audit_report, "raw_validations", []):
+                if finding.status in {CheckStatus.MISMATCH, CheckStatus.MISSING, CheckStatus.HIGH_RISK}:
+                    errors.append(f"{finding.title} 需覆核：{finding.risk or finding.explanation}")
+        errors.extend(self._manifest_errors(case))
         return _dedupe(errors)[:14]
 
     def risk_notes(self, case: CaseWorkflow) -> list[str]:
@@ -557,7 +609,15 @@ class RiskAnalysisEngine:
                     notes.append(f"{label}與佐證文件不一致，需優先覆核。")
                 elif result.status == CheckStatus.HIGH_RISK:
                     label = FIELD_LABELS.get(result.field, result.field.value)
-                    notes.append(f"{label}屬高風險欄位，需人工確認。")
+                    notes.append(f"{label}待人工確認。")
+            for finding in getattr(case.audit_report, "raw_validations", []):
+                if finding.status == CheckStatus.MISMATCH:
+                    notes.append(f"{finding.title}不一致，{finding.risk or finding.explanation}")
+                elif finding.status == CheckStatus.MISSING:
+                    notes.append(f"{finding.title}缺失，{finding.risk or finding.explanation}")
+                elif finding.status == CheckStatus.HIGH_RISK:
+                    notes.append(f"{finding.title}待人工確認，{finding.risk or finding.explanation}")
+        notes.extend(self._manifest_notes(case))
         return _dedupe(notes)[:12]
 
     def next_actions(self, case: CaseWorkflow) -> list[str]:
@@ -628,11 +688,44 @@ class RiskAnalysisEngine:
         is_partial, _message = self.vessel_voyage.partial_pending(result.declaration_value, result.document_values)
         return is_partial
 
+    def _manifest_segments(self, case: CaseWorkflow) -> list[DocumentSegment]:
+        return [segment for segment in case.documents if self.classifier.effective_type(segment) == DocumentType.MANIFEST]
+
+    def _manifest_errors(self, case: CaseWorkflow) -> list[str]:
+        if not self._manifest_segments(case):
+            return []
+        missing = self._manifest_missing_fields(case)
+        if not missing:
+            return []
+        return [f"艙單資料不完整：缺少{'、'.join(missing)}，需以 B/L、到貨通知或報單佐證。"]
+
+    def _manifest_notes(self, case: CaseWorkflow) -> list[str]:
+        if not self._manifest_segments(case):
+            return []
+        missing = self._manifest_missing_fields(case)
+        if missing:
+            return [f"艙單已作為船務佐證，但缺少{'、'.join(missing)}，建議人工確認艙單與報單船務資料是否一致。"]
+        return ["艙單已提供船名航次、櫃號與貨物摘要，可作為船務資料佐證。"]
+
+    def _manifest_missing_fields(self, case: CaseWorkflow) -> list[str]:
+        fields: set[CanonicalField] = set()
+        for segment in self._manifest_segments(case):
+            if segment.parsed:
+                fields.update(field.canonical for field in segment.parsed.fields if field.value)
+        required_groups = [
+            ("船名航次", {CanonicalField.VESSEL_VOYAGE, CanonicalField.VESSEL, CanonicalField.VOYAGE}),
+            ("櫃號", {CanonicalField.CONTAINER_NO}),
+            ("件數", {CanonicalField.PACKAGE_COUNT, CanonicalField.QUANTITY}),
+            ("重量", {CanonicalField.GROSS_WEIGHT, CanonicalField.NET_WEIGHT}),
+        ]
+        return [label for label, options in required_groups if not fields & options]
+
 
 class TaiwanCustomsLogicEngine:
     REQUIRED_PRACTICE_FIELDS = {
         CanonicalField.TRADE_PROMOTION_FEE: "推貿費",
         CanonicalField.BUSINESS_TAX: "營業稅",
+        CanonicalField.DUTY_RATE: "稅率",
         CanonicalField.IMPORT_REGULATION: "輸入規定",
         CanonicalField.MP1: "MP1",
         CanonicalField.BSMI: "BSMI",
@@ -683,6 +776,7 @@ class CustomsCaseOrganizer:
 
     def organize_case(self, case: CaseWorkflow) -> CustomsCaseOrganizerResult:
         shipment_summary = self.summary_builder.build_shipment_summary(case)
+        manifest_summary = self.summary_builder.build_manifest_summary(case)
         cargo_summary = self.summary_builder.build_cargo_summary(case)
         customs_summary = self.summary_builder.build_customs_summary(case)
         missing = self.risk.missing_documents(case)
@@ -698,6 +792,7 @@ class CustomsCaseOrganizer:
             case_id=case.case_id,
             grouping_confidence=case.grouping_confidence,
             shipment_summary=shipment_summary,
+            manifest_summary=manifest_summary,
             cargo_summary=cargo_summary,
             customs_summary=customs_summary,
             audit_summary=audit,
