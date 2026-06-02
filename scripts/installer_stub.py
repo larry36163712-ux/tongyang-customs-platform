@@ -199,6 +199,60 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _arg_value(name: str) -> str:
+    prefix = f"{name}="
+    for index, arg in enumerate(sys.argv):
+        if arg == name and index + 1 < len(sys.argv):
+            return sys.argv[index + 1]
+        if arg.startswith(prefix):
+            return arg.split("=", 1)[1]
+    return ""
+
+
+def _wait_for_process_exit(pid_text: str, timeout_seconds: int = 60) -> dict[str, str]:
+    if not pid_text:
+        return {"pid": "", "status": "not_requested"}
+    try:
+        pid = int(pid_text)
+    except ValueError:
+        return {"pid": pid_text, "status": "invalid_pid"}
+    if pid <= 0:
+        return {"pid": str(pid), "status": "invalid_pid"}
+    if os.name != "nt":
+        return {"pid": str(pid), "status": "skipped_non_windows"}
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel32.WaitForSingleObject.restype = ctypes.c_uint32
+    kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel32.TerminateProcess.restype = ctypes.c_int
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_int
+
+    synchronize = 0x00100000
+    process_terminate = 0x0001
+    wait_object_0 = 0x00000000
+    wait_timeout = 0x00000102
+    handle = kernel32.OpenProcess(synchronize | process_terminate, False, pid)
+    if not handle:
+        return {"pid": str(pid), "status": "not_running_or_inaccessible"}
+    try:
+        result = kernel32.WaitForSingleObject(handle, timeout_seconds * 1000)
+        if result == wait_object_0:
+            return {"pid": str(pid), "status": "exited"}
+        if result == wait_timeout:
+            terminated = bool(kernel32.TerminateProcess(handle, 1))
+            if terminated:
+                kernel32.WaitForSingleObject(handle, 5000)
+                return {"pid": str(pid), "status": "terminated_after_timeout"}
+            return {"pid": str(pid), "status": "timeout_terminate_failed"}
+        return {"pid": str(pid), "status": f"wait_result_{result}"}
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _finalize_installed_manifest(root: Path, target_exe: Path) -> None:
     manifest_path = root / "config" / "version.json"
     if not manifest_path.exists():
@@ -216,6 +270,43 @@ def _finalize_installed_manifest(root: Path, target_exe: Path) -> None:
             )
     except Exception:
         return
+
+
+def _verify_installed_update(root: Path, target_exe: Path, expected_version: str, expected_sha256: str) -> dict[str, str]:
+    result = {
+        "expected_version": expected_version,
+        "expected_sha256": expected_sha256.lower(),
+        "actual_version": "",
+        "actual_sha256": "",
+        "status": "not_required",
+    }
+    expected_version = expected_version.strip()
+    expected_sha256 = expected_sha256.strip().lower()
+    if not expected_version and not expected_sha256:
+        return result
+    if not target_exe.exists():
+        raise RuntimeError(f"Installed EXE missing: {target_exe}")
+
+    actual_sha256 = _sha256(target_exe).lower()
+    result["actual_sha256"] = actual_sha256
+    manifest_path = root / "config" / "version.json"
+    if not manifest_path.exists():
+        raise RuntimeError(f"Installed manifest missing: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(manifest, dict):
+        raise RuntimeError("Installed manifest is invalid")
+    actual_version = str(manifest.get("version", "")).strip()
+    manifest_sha256 = str(manifest.get("sha256", "")).strip().lower()
+    result["actual_version"] = actual_version
+
+    if expected_version and actual_version != expected_version:
+        raise RuntimeError(f"Installed version mismatch: actual={actual_version} expected={expected_version}")
+    if expected_sha256 and actual_sha256 != expected_sha256:
+        raise RuntimeError(f"Installed EXE SHA mismatch: actual={actual_sha256} expected={expected_sha256}")
+    if expected_sha256 and manifest_sha256 != expected_sha256:
+        raise RuntimeError(f"Installed manifest SHA mismatch: actual={manifest_sha256} expected={expected_sha256}")
+    result["status"] = "verified"
+    return result
 
 
 def _grant_runtime_permissions(root: Path) -> list[dict[str, str]]:
@@ -401,8 +492,12 @@ def _write_install_log(root: Path, state: dict[str, object]) -> None:
 
 def main() -> int:
     silent = "--silent" in sys.argv or "--silent-update" in sys.argv
+    silent_update = "--silent-update" in sys.argv
     no_launch = "--no-launch" in sys.argv
     machine_install = "--machine" in sys.argv or "--program-files" in sys.argv
+    wait_state = _wait_for_process_exit(_arg_value("--wait-pid")) if "--wait-pid" in sys.argv else {"pid": "", "status": "not_requested"}
+    expected_version = _arg_value("--expected-version")
+    expected_sha256 = _arg_value("--expected-sha256")
     if os.name == "nt" and machine_install and not _is_admin():
         if silent:
             return 5
@@ -411,9 +506,15 @@ def main() -> int:
 
     root = _install_root(machine_install)
     install_state = _copy_payload(root)
+    verification = _verify_installed_update(
+        root,
+        Path(install_state["exe"]),
+        expected_version=expected_version,
+        expected_sha256=expected_sha256,
+    )
     migration = _migrate_legacy_program_files_data(root, machine_install=machine_install)
     permissions = _grant_runtime_permissions(root)
-    shortcuts = _ensure_shortcuts(Path(install_state["exe"]))
+    shortcuts = [] if silent_update else _ensure_shortcuts(Path(install_state["exe"]))
     desktop_cleanup = _cleanup_desktop_artifacts(Path(install_state["exe"]))
     state = {
         "status": "installed",
@@ -425,6 +526,8 @@ def main() -> int:
         "desktop_cleanup": desktop_cleanup,
         "silent": silent,
         "install_scope": "machine" if machine_install else "per_user",
+        "wait_for_process": wait_state,
+        "verification": verification,
     }
     _write_install_log(root, state)
     if not no_launch:
@@ -444,7 +547,8 @@ if __name__ == "__main__":
         try:
             log_path = Path(tempfile.gettempdir()) / "TongYangCustomsPlatform_Setup_error.log"
             log_path.write_text(str(exc), encoding="utf-8")
-            ctypes.windll.user32.MessageBoxW(None, f"安裝失敗：{exc}", APP_DISPLAY_NAME, 0x10)
+            if "--silent" not in sys.argv and "--silent-update" not in sys.argv:
+                ctypes.windll.user32.MessageBoxW(None, f"安裝失敗：{exc}", APP_DISPLAY_NAME, 0x10)
         except Exception:
             pass
         raise

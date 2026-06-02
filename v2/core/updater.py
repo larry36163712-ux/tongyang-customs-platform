@@ -213,7 +213,7 @@ class V2Updater:
             self._log("progress replace scheduled")
             self._emit_progress(progress, "restarting", 100, "即將重新啟動")
             if self._is_installer_package(manifest, downloaded):
-                self._schedule_installer(downloaded)
+                self._schedule_installer(downloaded, manifest)
             else:
                 self._schedule_replace(downloaded)
         except Exception as exc:
@@ -539,76 +539,31 @@ class V2Updater:
         if not getattr(sys, "frozen", False):
             raise RuntimeError("目前不是 EXE 執行狀態，略過自動覆蓋")
 
-        current_exe = Path(sys.executable).resolve()
-        if self._requires_installer_update():
-            self._log(
-                "direct replace blocked for Program Files installation "
-                f"current_exe={current_exe} update_exe={update_exe}"
-            )
-            raise RuntimeError(
-                "Program Files installation requires installer-based update. "
-                "Direct EXE replacement is blocked."
-            )
-        backup_exe = current_exe.with_suffix(".rollback.exe")
-        script_path = update_exe.parent / "AI_Customs_ERP_V2_update.bat"
-        script = build_replace_script(
-            current_exe=current_exe,
-            update_exe=update_exe,
-            backup_exe=backup_exe,
-            log_path=self.log_path,
-            local_manifest_path=self.local_version_path,
-            pending_manifest_path=self.pending_manifest_path,
-            expected_sha256=hashlib.sha256(update_exe.read_bytes()).hexdigest().lower(),
-            old_pid=os.getpid(),
-            restart=True,
-            cleanup=True,
+        self._log(f"direct exe update blocked update_exe={update_exe}")
+        raise RuntimeError(
+            "Direct EXE replacement is disabled for production updates. "
+            "Release manifests must use TongYangCustomsPlatform_Setup.exe."
         )
-        script_path.write_text(script, encoding="utf-8")
-        self._log(f"replace script scheduled={script_path}")
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
-        subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=creationflags, close_fds=True)
-        os._exit(0)
 
-    def _schedule_installer(self, setup_exe: Path) -> None:
+    def _schedule_installer(self, setup_exe: Path, manifest: UpdateManifest) -> None:
         if not getattr(sys, "frozen", False):
             raise RuntimeError("目前不是 EXE 執行狀態，略過自動安裝")
 
-        script_path = setup_exe.parent / "TongYangCustomsPlatform_setup_update.bat"
-        if self._requires_installer_update():
-            install_command = (
-                'powershell -NoProfile -ExecutionPolicy Bypass -Command '
-                '"Start-Process -FilePath $env:SETUP -ArgumentList \'--silent-update\' -Verb RunAs -Wait"'
-            )
-        else:
-            install_command = '"%SETUP%" --silent-update'
-        script = f"""@echo off
-setlocal EnableExtensions
-set "SETUP={setup_exe}"
-set "LOG={self.log_path}"
-set "OLD_PID={os.getpid()}"
-set "TEMP_DIR=%~dp0"
-echo [%date% %time%] setup update scheduled setup=%SETUP% >> "%LOG%"
-for /l %%i in (1,1,60) do (
-  tasklist /FI "PID eq %OLD_PID%" | findstr /R /C:" %OLD_PID% " > nul
-  if errorlevel 1 goto old_process_exited
-  ping 127.0.0.1 -n 2 > nul
-)
-taskkill /PID %OLD_PID% /F >> "%LOG%" 2>&1
-:old_process_exited
-{install_command} >> "%LOG%" 2>&1
-if errorlevel 1 (
-  echo [%date% %time%] setup update failed >> "%LOG%"
-  exit /b 1
-)
-del /f /q "%SETUP%" >> "%LOG%" 2>&1
-echo [%date% %time%] setup update completed >> "%LOG%"
-start "" /b powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 2; Remove-Item -LiteralPath $env:TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
-exit /b 0
-"""
-        script_path.write_text(script, encoding="utf-8")
-        self._log(f"installer update script scheduled={script_path}")
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
-        subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=creationflags, close_fds=True)
+        command = [
+            str(setup_exe),
+            "--silent-update",
+            "--wait-pid",
+            str(os.getpid()),
+            "--expected-version",
+            manifest.version,
+            "--expected-sha256",
+            manifest.sha256,
+        ]
+        self._log(
+            "installer update scheduled direct_setup "
+            f"setup={setup_exe} expected_version={manifest.version} expected_sha256={manifest.sha256}"
+        )
+        subprocess.Popen(command, cwd=str(setup_exe.parent), creationflags=_hidden_process_flags(), close_fds=True)
         os._exit(0)
 
     def _log(self, message: str) -> None:
@@ -766,83 +721,6 @@ def repair_desktop_shortcuts(current_exe: str) -> list[dict[str, str]]:
     return ensure_shortcuts(Path(current_exe))
 
 
-def _shortcut_ps(current_exe: str, repair: bool) -> list[dict[str, str]]:
-    script = r'''
-$ErrorActionPreference = "Stop"
-$current = $env:TY_CURRENT_EXE
-$repair = $env:TY_REPAIR_SHORTCUT -eq "1"
-$shell = New-Object -ComObject WScript.Shell
-$dirs = @([Environment]::GetFolderPath("Desktop"), [Environment]::GetFolderPath("CommonDesktopDirectory")) | Where-Object { $_ -and (Test-Path $_) }
-$rows = @()
-foreach ($dir in $dirs) {
-  foreach ($lnk in Get-ChildItem -LiteralPath $dir -Filter *.lnk -Force -ErrorAction SilentlyContinue) {
-    try {
-      $sc = $shell.CreateShortcut($lnk.FullName)
-      $target = [string]$sc.TargetPath
-      $name = [string]$lnk.BaseName
-      $targetName = ""
-      if ($target) { $targetName = [IO.Path]::GetFileName($target) }
-      $isTongYang = $targetName -ieq "TongYangCustomsPlatform.exe" -or $name -match "TongYang|Customs|通洋|報關|报关"
-      if (-not $isTongYang) { continue }
-      $before = $target
-      $action = "inspect"
-      if ($repair -and $current -and $target -ne $current) {
-        $sc.TargetPath = $current
-        $sc.WorkingDirectory = [IO.Path]::GetDirectoryName($current)
-        $sc.Save()
-        $target = $sc.TargetPath
-        $action = "repaired"
-      }
-      $rows += [pscustomobject]@{
-        shortcut_path = $lnk.FullName
-        shortcut_name = $lnk.Name
-        target_path = $target
-        previous_target_path = $before
-        matches_current = ([string]$target -eq [string]$current)
-        action = $action
-      }
-    } catch {
-      $rows += [pscustomobject]@{
-        shortcut_path = $lnk.FullName
-        shortcut_name = $lnk.Name
-        target_path = ""
-        previous_target_path = ""
-        matches_current = $false
-        action = "error: $($_.Exception.Message)"
-      }
-    }
-  }
-}
-$rows | ConvertTo-Json -Depth 4 -Compress
-'''
-    env = dict(os.environ)
-    env["TY_CURRENT_EXE"] = current_exe
-    env["TY_REPAIR_SHORTCUT"] = "1" if repair else "0"
-    try:
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-            capture_output=True,
-            text=True,
-            timeout=12,
-            env=env,
-            check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-    except Exception:
-        return []
-    if completed.returncode != 0 or not completed.stdout.strip():
-        return []
-    try:
-        data = json.loads(completed.stdout)
-    except json.JSONDecodeError:
-        return []
-    if isinstance(data, dict):
-        return [{str(key): str(value) for key, value in data.items()}]
-    if isinstance(data, list):
-        return [{str(key): str(value) for key, value in item.items()} for item in data if isinstance(item, dict)]
-    return []
-
-
 def _read_json_url(url: str) -> dict | list:
     response = requests.get(
         url,
@@ -890,119 +768,7 @@ def _compare_versions(local: str, remote: str) -> int:
     return 1 if local_key > remote_key else -1
 
 
-def build_replace_script(
-    current_exe: Path,
-    update_exe: Path,
-    backup_exe: Path,
-    log_path: Path,
-    expected_sha256: str,
-    old_pid: int,
-    local_manifest_path: Path | None = None,
-    pending_manifest_path: Path | None = None,
-    restart: bool = True,
-    cleanup: bool = True,
-) -> str:
-    restart_line = (
-        'echo [%date% %time%] progress restart start >> "%LOG%"\nfor /f "usebackq delims=" %%p in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process -FilePath $env:CURRENT -PassThru; $p.Id"`) do echo [%date% %time%] restart pid=%%p >> "%LOG%"\nif errorlevel 1 (echo [%date% %time%] restart failed >> "%LOG%") else (echo [%date% %time%] restart success >> "%LOG%")'
-        if restart
-        else 'echo [%date% %time%] restart skipped >> "%LOG%"'
-    )
-    cleanup_lines = (
-        'del /f /q "%UPDATE%" >> "%LOG%" 2>&1\n'
-        'del /f /q "%BACKUP%" >> "%LOG%" 2>&1\n'
-        'start "" /b powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 2; Remove-Item -LiteralPath $env:UPDATER_TEMP_DIR -Recurse -Force -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1'
-        if cleanup
-        else 'echo [%date% %time%] cleanup skipped >> "%LOG%"'
-    )
-    return f"""@echo off
-setlocal EnableExtensions
-set "CURRENT={current_exe}"
-set "UPDATE={update_exe}"
-set "BACKUP={backup_exe}"
-set "LOG={log_path}"
-set "LOCAL_MANIFEST={local_manifest_path or ""}"
-set "PENDING_MANIFEST={pending_manifest_path or ""}"
-set "EXPECTED_SHA={expected_sha256.lower()}"
-set "OLD_PID={old_pid}"
-set "UPDATER_TEMP_DIR=%~dp0"
-
-if not exist "%~dp0" mkdir "%~dp0" > nul 2>&1
-if not exist "%LOG%" type nul > "%LOG%"
-echo [%date% %time%] update replace started >> "%LOG%"
-echo [%date% %time%] old exe path=%CURRENT% >> "%LOG%"
-echo [%date% %time%] new exe path=%UPDATE% >> "%LOG%"
-echo [%date% %time%] progress replace start >> "%LOG%"
-
-if not "%OLD_PID%"=="0" (
-  echo [%date% %time%] waiting for old pid=%OLD_PID% >> "%LOG%"
-  for /l %%i in (1,1,60) do (
-    tasklist /FI "PID eq %OLD_PID%" | findstr /R /C:" %OLD_PID% " > nul
-    if errorlevel 1 goto old_process_exited
-    ping 127.0.0.1 -n 2 > nul
-  )
-  echo [%date% %time%] old process still running, terminating pid=%OLD_PID% >> "%LOG%"
-  taskkill /PID %OLD_PID% /F >> "%LOG%" 2>&1
-  ping 127.0.0.1 -n 3 > nul
-)
-:old_process_exited
-echo [%date% %time%] old process exited >> "%LOG%"
-
-for /l %%i in (1,1,30) do (
-  copy /y "%CURRENT%" "%BACKUP%" >> "%LOG%" 2>&1
-  if not errorlevel 1 goto backup_done
-  ping 127.0.0.1 -n 2 > nul
-)
-echo [%date% %time%] backup failed >> "%LOG%"
-goto rollback
-
-:backup_done
-echo [%date% %time%] backup success path=%BACKUP% >> "%LOG%"
-copy /y "%UPDATE%" "%CURRENT%" >> "%LOG%" 2>&1
-if errorlevel 1 (
-  echo [%date% %time%] replace copy failed >> "%LOG%"
-  goto rollback
-)
-if not exist "%CURRENT%" (
-  echo [%date% %time%] current exe missing after replace >> "%LOG%"
-  goto rollback
-)
-
-for /f "usebackq delims=" %%h in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath $env:CURRENT).Hash.ToLower()"`) do set "ACTUAL_SHA=%%h"
-echo [%date% %time%] replaced sha256=%ACTUAL_SHA% >> "%LOG%"
-if /i not "%ACTUAL_SHA%"=="%EXPECTED_SHA%" (
-  echo [%date% %time%] sha256 mismatch, rollback >> "%LOG%"
-  goto rollback
-)
-
-echo [%date% %time%] replace verified >> "%LOG%"
-if not "%PENDING_MANIFEST%"=="" (
-  if exist "%PENDING_MANIFEST%" (
-    copy /y "%PENDING_MANIFEST%" "%LOCAL_MANIFEST%" >> "%LOG%" 2>&1
-    if errorlevel 1 (
-      echo [%date% %time%] local manifest finalize failed >> "%LOG%"
-      goto rollback
-    )
-    del /f /q "%PENDING_MANIFEST%" >> "%LOG%" 2>&1
-    echo [%date% %time%] local manifest finalized path=%LOCAL_MANIFEST% >> "%LOG%"
-  ) else (
-    echo [%date% %time%] pending manifest missing path=%PENDING_MANIFEST% >> "%LOG%"
-  )
-)
-echo [%date% %time%] replace success current=%CURRENT% >> "%LOG%"
-echo [%date% %time%] progress replace completed >> "%LOG%"
-{restart_line}
-{cleanup_lines}
-echo [%date% %time%] update replace completed >> "%LOG%"
-exit /b 0
-
-:rollback
-if exist "%BACKUP%" (
-  copy /y "%BACKUP%" "%CURRENT%" >> "%LOG%" 2>&1
-)
-if exist "%CURRENT%" (
-  {restart_line}
-)
-echo [%date% %time%] replace fail rollback current=%CURRENT% >> "%LOG%"
-echo [%date% %time%] update rollback completed >> "%LOG%"
-exit /b 1
-"""
+def _hidden_process_flags() -> int:
+    if os.name != "nt":
+        return 0
+    return subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
