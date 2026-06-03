@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -55,6 +56,9 @@ class SemanticDocumentClassifier:
 
     CONFIRMED_THRESHOLD = 0.78
     CANDIDATE_THRESHOLD = 0.34
+    CLASSIFICATION_TIMEOUT_SECONDS = 2.0
+    MAX_FUZZY_TEXT_LENGTH = 6000
+    MAX_APPROXIMATE_COMPARISONS = 12000
 
     PROFILES: tuple[DocumentSemanticProfile, ...] = (
         DocumentSemanticProfile(
@@ -209,24 +213,59 @@ class SemanticDocumentClassifier:
     def classify(self, text: str, filename: str = "") -> list[DocumentCandidate]:
         structure = self._structure(text)
         candidates: list[DocumentCandidate] = []
+        self._classification_deadline = time.monotonic() + self.CLASSIFICATION_TIMEOUT_SECONDS
+        self._approximate_comparisons = 0
+        timed_out = False
 
-        for profile in self.PROFILES:
-            breakdown = self._score_profile(profile, structure, filename)
-            confidence = round(min(0.98, max(0.0, sum(breakdown.values()))), 2)
-            if profile.document_type == DocumentType.DS2_DECLARATION:
-                confidence = self._cap_ds2_sparse_confidence(structure, confidence)
-            if confidence >= profile.minimum_score:
+        try:
+            for profile in self.PROFILES:
+                if self._classification_limit_reached():
+                    timed_out = True
+                    break
+                breakdown = self._score_profile(profile, structure, filename)
+                if self._classification_limit_reached():
+                    timed_out = True
+                    break
+                confidence = round(min(0.98, max(0.0, sum(breakdown.values()))), 2)
+                if profile.document_type == DocumentType.DS2_DECLARATION:
+                    confidence = self._cap_ds2_sparse_confidence(structure, confidence)
+                if confidence >= profile.minimum_score:
+                    candidates.append(
+                        DocumentCandidate(
+                            profile.document_type,
+                            confidence,
+                            self._evidence(profile, structure, filename),
+                            confidence < self.CONFIRMED_THRESHOLD,
+                            {key: round(value, 2) for key, value in breakdown.items() if abs(value) > 0.001},
+                        )
+                    )
+                    if self._classification_limit_reached():
+                        timed_out = True
+                        break
+
+            candidates = self._apply_boundary_rules(candidates, structure)
+        finally:
+            self._classification_deadline = 0.0
+            self._approximate_comparisons = 0
+
+        if timed_out:
+            reason = "文件分類耗時過長，已改用人工確認模式。"
+            if candidates:
+                for candidate in candidates:
+                    candidate.needs_manual_confirm = True
+                    candidate.score_breakdown["classification_timeout"] = -0.01
+                    if reason not in candidate.reasons:
+                        candidate.reasons.append(reason)
+            elif text.strip():
                 candidates.append(
                     DocumentCandidate(
-                        profile.document_type,
-                        confidence,
-                        self._evidence(profile, structure, filename),
-                        confidence < self.CONFIRMED_THRESHOLD,
-                        {key: round(value, 2) for key, value in breakdown.items() if abs(value) > 0.001},
+                        DocumentType.UNKNOWN,
+                        0.31,
+                        [reason],
+                        True,
+                        {"classification_timeout": 0.31},
                     )
                 )
-
-        candidates = self._apply_boundary_rules(candidates, structure)
 
         if not candidates and text.strip():
             candidates.append(
@@ -239,6 +278,10 @@ class SemanticDocumentClassifier:
                 )
             )
         return sorted(candidates, key=lambda candidate: candidate.confidence, reverse=True)
+
+    def _classification_limit_reached(self) -> bool:
+        deadline = getattr(self, "_classification_deadline", 0.0)
+        return bool(deadline and time.monotonic() > deadline) or getattr(self, "_approximate_comparisons", 0) >= self.MAX_APPROXIMATE_COMPARISONS
 
     def _apply_boundary_rules(
         self,
@@ -532,6 +575,8 @@ class SemanticDocumentClassifier:
     def _semantic_hits(self, text: str, terms: tuple[str, ...]) -> list[str]:
         hits = [term for term in terms if term and self._normalize(term) in text]
         for term in terms:
+            if self._classification_limit_reached():
+                break
             if not term or term in hits:
                 continue
             if self._approximate_contains(text, term):
@@ -548,14 +593,33 @@ class SemanticDocumentClassifier:
             return compact_term in compact_text
         if compact_term in compact_text:
             return True
+        if len(compact_text) > self.MAX_FUZZY_TEXT_LENGTH:
+            return self._token_contains(text, normalized_term)
         window = len(compact_term)
         best = 0.0
         for index in range(0, max(1, len(compact_text) - window + 1), max(1, window // 3)):
+            if self._classification_limit_reached():
+                return False
             chunk = compact_text[index : index + window]
+            self._approximate_comparisons = getattr(self, "_approximate_comparisons", 0) + 1
             best = max(best, SequenceMatcher(None, compact_term, chunk).ratio())
             if best >= 0.82:
                 return True
         return False
+
+    def _token_contains(self, text: str, term: str) -> bool:
+        term_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]{2,}|[\u4e00-\u9fff]{1,}", self._normalize(term))
+            if token not in {"no", "of", "the"}
+        }
+        if not term_tokens:
+            return False
+        text_tokens = set(re.findall(r"[a-z0-9]{2,}|[\u4e00-\u9fff]{1,}", text))
+        if len(term_tokens) == 1:
+            token = next(iter(term_tokens))
+            return len(token) >= 4 and token in text_tokens
+        return len(term_tokens.intersection(text_tokens)) / len(term_tokens) >= 0.75
 
     def _document_similarity_score(self, profile: DocumentSemanticProfile, structure: OCRStructure) -> float:
         anchors = profile.layout_terms + profile.semantic_fields + profile.customs_vocabulary + profile.shipping_terms + profile.trade_fingerprint

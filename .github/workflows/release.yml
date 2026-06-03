@@ -122,7 +122,13 @@ jobs:
           python -m py_compile v2\ui\main_window.py v2\core\updater.py v2\core\settings.py scripts\make_release_manifest.py scripts\release_contract.py
           python scripts\test_v2_document_workflow.py
           python scripts\test_v2_declaration_workflow.py
+          python scripts\test_v2_document_understanding.py
+          python scripts\test_v2_case_organizer.py
+          python scripts\test_v2_internal_qa_hardening.py
           python scripts\test_v2_updater_version_source.py
+          python scripts\test_v2_updater_workflow.py
+          python scripts\test_shortcut_cleanup_contract.py
+          python scripts\test_v2_ui_release_contract.py
 
       - name: Build release package
         shell: pwsh

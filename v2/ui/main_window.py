@@ -1152,6 +1152,10 @@ class CustomsErpWindow(QMainWindow):
         text = f"{stage} {message}".strip()
         replacements = {
             "parser": "文件辨識",
+            "parser failed": "文件辨識未完成",
+            "RuntimeError": "系統處理異常",
+            "Traceback": "系統紀錄",
+            "traceback": "系統紀錄",
             "workflow grouping": "自動分組",
             "workflow pipeline": "案件核對流程",
             "pipeline": "處理流程",

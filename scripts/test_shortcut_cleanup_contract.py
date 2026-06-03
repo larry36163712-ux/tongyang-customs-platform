@@ -20,24 +20,34 @@ def _touch(path: Path) -> None:
 def main() -> int:
     original_userprofile = os.environ.get("USERPROFILE")
     original_public = os.environ.get("PUBLIC")
+    original_appdata = os.environ.get("APPDATA")
+    original_programdata = os.environ.get("ProgramData")
     try:
         with tempfile.TemporaryDirectory(prefix="ty-shortcut-cleanup-") as tmp:
             root = Path(tmp)
             user_profile = root / "User"
             public = root / "Public"
+            appdata = user_profile / "AppData" / "Roaming"
+            program_data = root / "ProgramData"
             desktop = user_profile / "Desktop"
             public_desktop = public / "Desktop"
+            start_menu = appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "TongYang Customs Platform"
+            public_start_menu = program_data / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "TongYang Customs Platform"
+            taskbar = appdata / "Microsoft" / "Internet Explorer" / "Quick Launch" / "User Pinned" / "TaskBar"
             install_exe = user_profile / "AppData" / "Local" / "TongYangCustomsPlatform" / "TongYangCustomsPlatform.exe"
             _touch(install_exe)
 
             os.environ["USERPROFILE"] = str(user_profile)
             os.environ["PUBLIC"] = str(public)
+            os.environ["APPDATA"] = str(appdata)
+            os.environ["ProgramData"] = str(program_data)
 
             forbidden = [
                 desktop / "TongYangCustomsPlatform.exe",
                 desktop / "TongYangCustomsPlatform_Setup.exe",
                 desktop / "updater.exe",
                 desktop / "update.bat",
+                desktop / "AI_Customs_ERP_V2_update.ps1",
                 desktop / "version.json",
                 desktop / "SHA256.txt",
                 desktop / "TongYangCustomsPlatform.update.exe",
@@ -50,6 +60,16 @@ def main() -> int:
                 public_desktop / "update.bat",
                 public_desktop / "version.json",
                 public_desktop / "SHA256.txt",
+                start_menu / "TongYangCustomsPlatform.exe",
+                start_menu / "TongYangCustomsPlatform_Setup.exe",
+                start_menu / "version.json",
+                start_menu / "SHA256.txt",
+                start_menu / "TongYangCustomsPlatform_setup_update.ps1",
+                public_start_menu / "TongYangCustomsPlatform.exe",
+                public_start_menu / "TongYangCustomsPlatform_Setup.exe",
+                public_start_menu / "version.json",
+                taskbar / "TongYangCustomsPlatform_Setup.update.exe",
+                taskbar / "AI_Customs_ERP_V2_update.ps1",
             ]
             for path in forbidden:
                 _touch(path)
@@ -74,6 +94,14 @@ def main() -> int:
             os.environ.pop("PUBLIC", None)
         else:
             os.environ["PUBLIC"] = original_public
+        if original_appdata is None:
+            os.environ.pop("APPDATA", None)
+        else:
+            os.environ["APPDATA"] = original_appdata
+        if original_programdata is None:
+            os.environ.pop("ProgramData", None)
+        else:
+            os.environ["ProgramData"] = original_programdata
     print("shortcut cleanup contract OK")
     return 0
 

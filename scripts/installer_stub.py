@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from v2.core.shortcut_manager import looks_related_shortcut, read_shortcut_target, write_shortcut
+
 
 APP_DIR_NAME = "TongYangCustomsPlatform"
 APP_DISPLAY_NAME = "通洋報關平台"
@@ -35,8 +37,11 @@ DESKTOP_ARTIFACT_PATTERNS = (
 )
 UPDATE_SCRIPT_NAMES = (
     "AI_Customs_ERP_V2_update.bat",
+    "AI_Customs_ERP_V2_update.ps1",
     "TongYangCustoms_setup_update.bat",
+    "TongYangCustoms_setup_update.ps1",
     "TongYangCustomsPlatform_setup_update.bat",
+    "TongYangCustomsPlatform_setup_update.ps1",
     "update.bat",
 )
 
@@ -363,76 +368,117 @@ def _is_program_files_path(path: Path) -> bool:
     return False
 
 
-def _ensure_shortcuts(exe: Path) -> list[dict[str, str]]:
-    script = r'''
-$ErrorActionPreference = "Stop"
-$exe = $env:TY_APP_EXE
-$name = $env:TY_APP_NAME
-$shell = New-Object -ComObject WScript.Shell
-$desktop = [Environment]::GetFolderPath("Desktop")
-$publicDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
-$programs = [Environment]::GetFolderPath("Programs")
-$startMenu = Join-Path $programs "TongYang Customs Platform"
-$publicPrograms = [Environment]::GetFolderPath("CommonPrograms")
-$publicStartMenu = if ($publicPrograms) { Join-Path $publicPrograms "TongYang Customs Platform" } else { "" }
-if (-not (Test-Path -LiteralPath $startMenu)) { New-Item -ItemType Directory -Path $startMenu -Force | Out-Null }
-$targets = @(
-  (Join-Path $desktop ($name + ".lnk")),
-  (Join-Path $startMenu ($name + ".lnk"))
-)
-$rows = @()
-foreach ($shortcutPath in $targets) {
-  $shortcut = $shell.CreateShortcut($shortcutPath)
-  $previous = [string]$shortcut.TargetPath
-  $shortcut.TargetPath = $exe
-  $shortcut.WorkingDirectory = [IO.Path]::GetDirectoryName($exe)
-  $shortcut.IconLocation = $exe
-  $shortcut.Save()
-  $rows += [pscustomobject]@{ shortcut_path=$shortcutPath; target_path=$exe; previous_target_path=$previous; action="created_or_repaired" }
-}
-$canonicalPaths = $targets
-foreach ($dir in @($desktop, $publicDesktop, $startMenu, $publicStartMenu)) {
-  if (-not $dir -or -not (Test-Path -LiteralPath $dir)) { continue }
-  foreach ($lnk in Get-ChildItem -LiteralPath $dir -Filter *.lnk -Force -ErrorAction SilentlyContinue) {
-    try {
-      $sc = $shell.CreateShortcut($lnk.FullName)
-      $target = [string]$sc.TargetPath
-      $targetName = if ($target) { [IO.Path]::GetFileName($target) } else { "" }
-      $isCanonical = $canonicalPaths -contains $lnk.FullName
-      $related = $targetName -ieq "TongYangCustomsPlatform.exe" -or $lnk.BaseName -match "TongYang|Customs|通洋|報關|报关"
-      if ($related -and -not $isCanonical) {
-        Remove-Item -LiteralPath $lnk.FullName -Force -ErrorAction Stop
-        $rows += [pscustomobject]@{ shortcut_path=$lnk.FullName; target_path=$target; previous_target_path=$target; action="removed_duplicate_shortcut" }
-      } elseif ($related -and $target -ne $exe) {
-        $previous = $target
-        $sc.TargetPath = $exe
-        $sc.WorkingDirectory = [IO.Path]::GetDirectoryName($exe)
-        $sc.IconLocation = $exe
-        $sc.Save()
-        $rows += [pscustomobject]@{ shortcut_path=$lnk.FullName; target_path=$exe; previous_target_path=$previous; action="repaired_old_shortcut" }
-      }
-    } catch {}
-  }
-}
-$rows | ConvertTo-Json -Depth 4 -Compress
-'''
-    env = dict(os.environ)
-    env["TY_APP_EXE"] = str(exe)
-    env["TY_APP_NAME"] = APP_DISPLAY_NAME
-    completed = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=20,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        check=True,
-    )
-    output = completed.stdout.strip()
-    if not output:
-        return []
-    parsed = json.loads(output)
-    return parsed if isinstance(parsed, list) else [parsed]
+def _desktop_dir() -> Path | None:
+    user_profile = os.environ.get("USERPROFILE")
+    return Path(user_profile) / "Desktop" if user_profile else None
+
+
+def _start_menu_dir() -> Path | None:
+    appdata = os.environ.get("APPDATA")
+    return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "TongYang Customs Platform" if appdata else None
+
+
+def _taskbar_pinned_dir() -> Path | None:
+    appdata = os.environ.get("APPDATA")
+    return Path(appdata) / "Microsoft" / "Internet Explorer" / "Quick Launch" / "User Pinned" / "TaskBar" if appdata else None
+
+
+def _canonical_shortcut_paths() -> list[Path]:
+    paths: list[Path] = []
+    desktop = _desktop_dir()
+    start_menu = _start_menu_dir()
+    if desktop:
+        paths.append(desktop / f"{APP_DISPLAY_NAME}.lnk")
+    if start_menu:
+        paths.append(start_menu / f"{APP_DISPLAY_NAME}.lnk")
+    return paths
+
+
+def _shortcut_scan_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    user_profile = os.environ.get("USERPROFILE")
+    public = os.environ.get("PUBLIC")
+    appdata = os.environ.get("APPDATA")
+    program_data = os.environ.get("ProgramData")
+    if user_profile:
+        candidates.append(Path(user_profile) / "Desktop")
+    if public:
+        candidates.append(Path(public) / "Desktop")
+    if appdata:
+        candidates.append(Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "TongYang Customs Platform")
+        candidates.append(Path(appdata) / "Microsoft" / "Internet Explorer" / "Quick Launch" / "User Pinned" / "TaskBar")
+    if program_data:
+        candidates.append(Path(program_data) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "TongYang Customs Platform")
+    return [path for path in candidates if path.exists()]
+
+
+def _ensure_shortcuts(exe: Path) -> list[dict[str, str]]:  # type: ignore[no-redef]
+    exe = exe.resolve()
+    rows: list[dict[str, str]] = []
+    canonical_paths = _canonical_shortcut_paths()
+    for shortcut_path in canonical_paths:
+        previous = read_shortcut_target(shortcut_path)
+        try:
+            target = write_shortcut(shortcut_path, exe, working_dir=exe.parent, icon_path=exe)
+            rows.append(
+                {
+                    "shortcut_path": str(shortcut_path),
+                    "target_path": target or str(exe),
+                    "previous_target_path": previous,
+                    "action": "created_or_repaired",
+                }
+            )
+        except Exception as exc:
+            rows.append(
+                {
+                    "shortcut_path": str(shortcut_path),
+                    "target_path": "",
+                    "previous_target_path": previous,
+                    "action": f"error: {exc}",
+                }
+            )
+
+    canonical_resolved = {str(path.resolve()).casefold() for path in canonical_paths if path.parent.exists()}
+    taskbar_dir = _taskbar_pinned_dir()
+    for directory in _shortcut_scan_dirs():
+        is_taskbar = taskbar_dir is not None and directory.resolve() == taskbar_dir.resolve()
+        for shortcut_path in directory.glob("*.lnk"):
+            try:
+                target = read_shortcut_target(shortcut_path)
+                if not looks_related_shortcut(shortcut_path, target, APP_DISPLAY_NAME):
+                    continue
+                is_canonical = str(shortcut_path.resolve()).casefold() in canonical_resolved
+                if not is_canonical and not is_taskbar:
+                    shortcut_path.unlink(missing_ok=True)
+                    rows.append(
+                        {
+                            "shortcut_path": str(shortcut_path),
+                            "target_path": target,
+                            "previous_target_path": target,
+                            "action": "removed_duplicate_shortcut",
+                        }
+                    )
+                elif target and Path(target).resolve() != exe:
+                    before = target
+                    repaired_target = write_shortcut(shortcut_path, exe, working_dir=exe.parent, icon_path=exe)
+                    rows.append(
+                        {
+                            "shortcut_path": str(shortcut_path),
+                            "target_path": repaired_target or str(exe),
+                            "previous_target_path": before,
+                            "action": "repaired_old_shortcut",
+                        }
+                    )
+            except Exception as exc:
+                rows.append(
+                    {
+                        "shortcut_path": str(shortcut_path),
+                        "target_path": "",
+                        "previous_target_path": "",
+                        "action": f"error: {exc}",
+                    }
+                )
+    return rows
 
 
 def _cleanup_desktop_artifacts(installed_exe: Path) -> list[str]:
@@ -440,10 +486,17 @@ def _cleanup_desktop_artifacts(installed_exe: Path) -> list[str]:
     desktop_dirs = []
     user_profile = os.environ.get("USERPROFILE")
     public = os.environ.get("PUBLIC")
+    appdata = os.environ.get("APPDATA")
+    program_data = os.environ.get("ProgramData")
     if user_profile:
         desktop_dirs.append(Path(user_profile) / "Desktop")
     if public:
         desktop_dirs.append(Path(public) / "Desktop")
+    if appdata:
+        desktop_dirs.append(Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "TongYang Customs Platform")
+        desktop_dirs.append(Path(appdata) / "Microsoft" / "Internet Explorer" / "Quick Launch" / "User Pinned" / "TaskBar")
+    if program_data:
+        desktop_dirs.append(Path(program_data) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "TongYang Customs Platform")
 
     for directory in desktop_dirs:
         if not directory.exists():

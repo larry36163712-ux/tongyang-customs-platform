@@ -288,9 +288,11 @@ class V2Updater:
             config_dir / "stale_sha_cache.json",
             temp_dir / "AI_Customs_ERP_V2.update.exe",
             temp_dir / "AI_Customs_ERP_V2_update.bat",
+            temp_dir / "AI_Customs_ERP_V2_update.ps1",
             temp_dir / "TongYangCustomsPlatform.update.exe",
             temp_dir / "TongYangCustomsPlatform_Setup.update.exe",
             temp_dir / "TongYangCustomsPlatform_setup_update.bat",
+            temp_dir / "TongYangCustomsPlatform_setup_update.ps1",
         ]
         removed: list[str] = []
         for path in candidates:

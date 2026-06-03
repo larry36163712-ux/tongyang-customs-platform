@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,7 +10,8 @@ sys.path.insert(0, str(ROOT))
 from v2.core.document_understanding import SemanticDocumentClassifier
 from v2.core.models import DocumentType
 from v2.workflow.matcher import WorkflowMatcher
-from v2.workflow.models import DocumentSegment
+from v2.workflow.models import DocumentSegment, IntakeFile, IntakePage
+from v2.workflow.splitter import SmartDocumentSplitter
 
 
 def _segment(name: str, text: str) -> DocumentSegment:
@@ -181,6 +183,39 @@ def main() -> None:
         raise RuntimeError(f"Shiken DS2 declaration was not recognized: {shiken_ds2}")
     if shiken_ds2.confidence < 0.62:
         raise RuntimeError(f"Shiken DS2 declaration confidence too low: {shiken_ds2.confidence}")
+
+    long_classifier = SemanticDocumentClassifier()
+    long_text = ("random customs page without direct anchors " * 1200).strip()
+    started = time.monotonic()
+    long_candidates = long_classifier.classify(long_text, "large.pdf")
+    elapsed = time.monotonic() - started
+    if elapsed > 1.5:
+        raise RuntimeError(f"large document semantic classification was too slow: {elapsed:.2f}s")
+    if not long_candidates:
+        raise RuntimeError("large document classification must return a manual-review candidate")
+
+    timeout_classifier = SemanticDocumentClassifier()
+    timeout_classifier.MAX_FUZZY_TEXT_LENGTH = 1_000_000
+    timeout_classifier.MAX_APPROXIMATE_COMPARISONS = 1
+    timeout_candidates = timeout_classifier.classify("x " * 5000, "timeout.pdf")
+    if not timeout_candidates or not timeout_candidates[0].needs_manual_confirm:
+        raise RuntimeError("semantic timeout should produce a manual confirmation candidate")
+    if "文件分類耗時過長，已改用人工確認模式。" not in timeout_candidates[0].reasons:
+        raise RuntimeError("semantic timeout reason was not exposed for ERP display")
+
+    splitter = SmartDocumentSplitter()
+    splitter.semantic_classifier.MAX_FUZZY_TEXT_LENGTH = 1_000_000
+    splitter.semantic_classifier.MAX_APPROXIMATE_COMPARISONS = 1
+    split_segments = splitter.split(
+        IntakeFile(
+            path=Path("timeout.pdf"),
+            suffix=".pdf",
+            pages=[IntakePage(1, "x " * 5000)],
+            text="x " * 5000,
+        )
+    )
+    if not split_segments or "文件分類耗時過長" not in split_segments[0].manual_confirm_reason:
+        raise RuntimeError("splitter did not keep timeout files in manual review mode")
 
     cases = WorkflowMatcher().group_cases(docs, direction="import")
     if len(cases) != 1:
