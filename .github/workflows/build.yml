@@ -45,17 +45,17 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
-          python -m py_compile v2\ui\main_window.py v2\core\updater.py scripts\make_release_manifest.py scripts\release_contract.py
-          python scripts\test_v2_document_workflow.py
-          python scripts\test_v2_declaration_workflow.py
-          python scripts\test_v2_updater_version_source.py
+          python -m py_compile source\v2\ui\main_window.py source\v2\core\updater.py source\scripts\release_contract.py
+          python source\scripts\test_v2_document_workflow.py
+          python source\scripts\test_v2_declaration_workflow.py
+          python source\scripts\test_v2_updater_version_source.py
 
       - name: Build release package
         shell: pwsh
         run: |
           $version = "${{ inputs.version || '1.1.2-dev' }}"
           $channel = "${{ inputs.channel || 'dev' }}"
-          .\scripts\build_release_package.ps1 `
+          .\source\scripts\build_release_package.ps1 `
             -Repo "${{ github.repository }}" `
             -Tag "v$version" `
             -Version $version `
@@ -72,7 +72,7 @@ jobs:
           $tag = "v$version"
           $assetName = "TongYangCustomsPlatform_Setup.exe"
           $exePath = Join-Path "dist" $assetName
-          python scripts\release_contract.py `
+          python source\scripts\release_contract.py `
             --mode manifest `
             --repo $repo `
             --tag $tag `

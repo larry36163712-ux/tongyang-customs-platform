@@ -6,7 +6,7 @@ This repository is the formal AI Customs ERP project. Prototype build files, leg
 
 ### `app/`
 
-Legacy-compatible application modules that still provide shared business utilities, historical checker logic, runtime helpers, and parser support. Keep this directory because current code and compatibility paths still reference it.
+Legacy-compatible application modules that still provide shared business utilities, historical checker logic, runtime helpers, and parser support. The legacy updater has been retired; production update behavior lives under `v2/core/updater.py`.
 
 ### `v2/`
 
@@ -43,9 +43,10 @@ Architecture, release, and repository documentation.
 
 Maintained automation and verification scripts.
 
-- `make_release_manifest.py`: creates GitHub release `version.json`.
+- `build_release_package.ps1`: builds the app EXE, installer package, `version.json`, and `SHA256.txt`.
+- `release_manager.ps1`: creates or updates GitHub releases and uploads official assets.
+- `release_contract.py`: verifies release asset and manifest contracts.
 - `upload_release_asset.ps1`: uploads release assets with enforced executable asset naming.
-- `check_github_release_auth.ps1`: checks local Git/GitHub CLI authentication and repository access for release publishing.
 - `test_v2_document_workflow.py`: workflow engine regression test.
 - `test_v2_declaration_workflow.py`: declaration workflow regression test.
 - `test_v2_updater_version_source.py`: version-source/update status regression test.

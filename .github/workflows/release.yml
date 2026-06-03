@@ -19,12 +19,11 @@ on:
     branches:
       - main
     paths:
-      - "app/**"
-      - "v2/**"
-      - "engine/**"
-      - "config/**"
-      - "scripts/**"
-      - "templates/**"
+      - "source/v2/**"
+      - "source/engine/**"
+      - "source/config/**"
+      - "source/scripts/**"
+      - "source/templates/**"
       - "AI_Customs_ERP_V2.spec"
       - "build_v2_exe.ps1"
       - ".github/workflows/release.yml"
@@ -65,7 +64,7 @@ jobs:
             $normalizedVersion = Normalize-VersionInput "${{ inputs.version }}"
             $requestedChannel = "${{ inputs.channel }}"
           } else {
-            $manifest = Get-Content "config\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+            $manifest = Get-Content "source\config\version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
             $normalizedVersion = Normalize-VersionInput "$($manifest.version)"
             $requestedChannel = ""
           }
@@ -119,21 +118,21 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
-          python -m py_compile v2\ui\main_window.py v2\core\updater.py v2\core\settings.py scripts\make_release_manifest.py scripts\release_contract.py
-          python scripts\test_v2_document_workflow.py
-          python scripts\test_v2_declaration_workflow.py
-          python scripts\test_v2_document_understanding.py
-          python scripts\test_v2_case_organizer.py
-          python scripts\test_v2_internal_qa_hardening.py
-          python scripts\test_v2_updater_version_source.py
-          python scripts\test_v2_updater_workflow.py
-          python scripts\test_shortcut_cleanup_contract.py
-          python scripts\test_v2_ui_release_contract.py
+          python -m py_compile source\v2\ui\main_window.py source\v2\core\updater.py source\v2\core\settings.py source\scripts\release_contract.py
+          python source\scripts\test_v2_document_workflow.py
+          python source\scripts\test_v2_declaration_workflow.py
+          python source\scripts\test_v2_document_understanding.py
+          python source\scripts\test_v2_case_organizer.py
+          python source\scripts\test_v2_internal_qa_hardening.py
+          python source\scripts\test_v2_updater_version_source.py
+          python source\scripts\test_v2_updater_workflow.py
+          python source\scripts\test_shortcut_cleanup_contract.py
+          python source\scripts\test_v2_ui_release_contract.py
 
       - name: Build release package
         shell: pwsh
         run: |
-          .\scripts\build_release_package.ps1 `
+          .\source\scripts\build_release_package.ps1 `
             -Repo "${{ github.repository }}" `
             -Tag "${{ steps.vars.outputs.tag }}" `
             -Version "${{ steps.vars.outputs.version }}" `
@@ -154,19 +153,19 @@ jobs:
           if (-not (Test-Path -LiteralPath $exePath)) {
             throw "Expected setup EXE not found: $exePath"
           }
-          python scripts\release_contract.py `
+          python source\scripts\release_contract.py `
             --mode manifest `
             --repo $repo `
             --tag $tag `
             --channel $channel `
             --manifest "dist\version.json"
 
-          if (Test-Path "config\v2_settings.json") {
-            $settings = Get-Content "config\v2_settings.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          if (Test-Path "source\config\v2_settings.json") {
+            $settings = Get-Content "source\config\v2_settings.json" -Raw -Encoding UTF8 | ConvertFrom-Json
             $settings.update.channel = $channel
             $settings.update.stable_manifest_url = "https://github.com/$repo/releases/latest/download/version.json"
-            $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
-            $settings | ConvertTo-Json -Depth 30 | Set-Content "config\v2_settings.json" -Encoding UTF8
+            $settings.update.dev_manifest_url = "https://raw.githubusercontent.com/$repo/main/source/config/dev_version.json"
+            $settings | ConvertTo-Json -Depth 30 | Set-Content "source\config\v2_settings.json" -Encoding UTF8
           }
 
       - name: Upload build artifact
@@ -186,7 +185,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add config\version.json config\v2_settings.json config\dev_version.json
+          git add source\config\version.json source\config\v2_settings.json source\config\dev_version.json
           $changes = git status --porcelain
           if ($changes) {
             git commit -m "chore: sync ${{ steps.vars.outputs.channel }} release manifest ${{ steps.vars.outputs.version }}"
@@ -230,7 +229,7 @@ jobs:
           git tag -f $tag HEAD
           git push origin -f $tag
 
-          .\scripts\release_manager.ps1 `
+          .\source\scripts\release_manager.ps1 `
             -Repo $repo `
             -Tag $tag `
             -Channel $channel `
@@ -261,7 +260,7 @@ jobs:
             $exeUrl = "https://github.com/$repo/releases/latest/download/TongYangCustomsPlatform_Setup.exe"
             $shaUrl = "https://github.com/$repo/releases/latest/download/SHA256.txt"
           } else {
-            $manifestUrl = "https://raw.githubusercontent.com/$repo/main/config/dev_version.json"
+            $manifestUrl = "https://raw.githubusercontent.com/$repo/main/source/config/dev_version.json"
             $exeUrl = "https://github.com/$repo/releases/download/$tag/TongYangCustomsPlatform_Setup.exe"
             $shaUrl = "https://github.com/$repo/releases/download/$tag/SHA256.txt"
           }
@@ -287,7 +286,7 @@ jobs:
           if ($shaText -notmatch "TongYangCustomsPlatform_Setup\.exe") { throw "SHA256.txt does not reference TongYangCustomsPlatform_Setup.exe" }
 
           $contractArgs = @(
-            "scripts\release_contract.py",
+            "source\scripts\release_contract.py",
             "--repo", $repo,
             "--tag", $tag,
             "--channel", $channel,

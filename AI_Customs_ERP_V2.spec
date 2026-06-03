@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 ROOT = Path.cwd()
+SOURCE = ROOT / "source"
 VERSION_FILE = ROOT / "version_info.txt"
 datas = []
 for source, target in (
@@ -13,7 +14,7 @@ for source, target in (
     ("engine", "engine"),
     ("v2", "v2"),
 ):
-    path = ROOT / source
+    path = SOURCE / source
     if path.exists():
         datas.append((str(path), target))
 
@@ -46,8 +47,8 @@ runtime_packages = [
 ]
 
 a = Analysis(
-    ["v2/main.py"],
-    pathex=[str(ROOT)],
+    ["source/v2/main.py"],
+    pathex=[str(SOURCE), str(ROOT)],
     binaries=[],
     datas=datas,
     hiddenimports=[

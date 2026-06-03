@@ -110,7 +110,7 @@ def main() -> None:
         ],
     )
 
-    engine = DocumentWorkflowEngine(cache_root=root / "cache", rules_path=Path("config/customs_rules.json"))
+    engine = DocumentWorkflowEngine(cache_root=root / "cache", rules_path=root / "config/customs_rules.json")
     result = engine.process_paths([str(invoice), str(packing), str(arrival), str(manifest), str(declaration)])
     if not result.cases:
         raise RuntimeError("case organizer test produced no workflow case")

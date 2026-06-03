@@ -9,7 +9,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$sourceDir = Join-Path $root "source"
 $distDir = Join-Path $root "dist"
 $payloadDir = Join-Path $root "installer_payload"
 $appExeName = "TongYangCustomsPlatform.exe"
@@ -20,8 +21,8 @@ $distManifestPath = Join-Path $distDir "version.json"
 $runtimeManifestPath = Join-Path $distDir "config\version.json"
 $payloadManifestPath = Join-Path $payloadDir "version.json"
 $distShaPath = Join-Path $distDir "SHA256.txt"
-$configManifestPath = Join-Path $root "config\version.json"
-$devManifestPath = Join-Path $root "config\dev_version.json"
+$configManifestPath = Join-Path $sourceDir "config\version.json"
+$devManifestPath = Join-Path $sourceDir "config\dev_version.json"
 $appDisplayName = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("6YCa5rSL5aCx6Zec5bmz5Y+w"))
 
 function Write-JsonFile {

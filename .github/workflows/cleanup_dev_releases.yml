@@ -44,7 +44,7 @@ jobs:
           if ($latest.prerelease -or $latestTag -notmatch '^v\d+\.\d+\.\d+$') {
             throw "Cleanup safety refused to continue: /releases/latest is not stable ($latestTag)."
           }
-          python scripts\release_contract.py --repo $repo --tag $latestTag --channel stable --token $env:GH_TOKEN --require-latest
+          python source\scripts\release_contract.py --repo $repo --tag $latestTag --channel stable --token $env:GH_TOKEN --require-latest
 
           $devReleases = @($releases | Where-Object {
             ([string]$_.tagName) -match '^DEV-' -or ([string]$_.tagName) -match '^v\d+\.\d+\.\d+-dev(\.\d+)?$'

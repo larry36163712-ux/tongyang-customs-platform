@@ -304,7 +304,7 @@ if ($Channel -eq "dev") {
     Invoke-Gh api --method PATCH "repos/$Repo/releases/$($release.databaseId)" -F prerelease=false -F make_latest=true
 }
 
-.\scripts\upload_release_asset.ps1 `
+& (Join-Path $PSScriptRoot "upload_release_asset.ps1") `
     -Repo $Repo `
     -Tag $Tag `
     -Path $ExePath `

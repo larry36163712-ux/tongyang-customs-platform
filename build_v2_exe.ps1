@@ -2,8 +2,9 @@ $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$configVersion = Join-Path $PSScriptRoot "config\version.json"
-$configSettings = Join-Path $PSScriptRoot "config\v2_settings.json"
+$sourceDir = Join-Path $PSScriptRoot "source"
+$configVersion = Join-Path $sourceDir "config\version.json"
+$configSettings = Join-Path $sourceDir "config\v2_settings.json"
 if (-not (Test-Path -LiteralPath $configVersion)) {
     throw "Missing canonical version source: $configVersion"
 }

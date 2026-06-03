@@ -62,7 +62,7 @@ def main() -> None:
                         "check_on_startup": True,
                         "channel": "stable",
                         "stable_manifest_url": "https://github.com/example/repo/releases/latest/download/version.json",
-                        "dev_manifest_url": "https://raw.githubusercontent.com/example/repo/main/config/dev_version.json",
+                        "dev_manifest_url": "https://raw.githubusercontent.com/example/repo/main/source/config/dev_version.json",
                     },
                     "developer_mode": False,
                 },

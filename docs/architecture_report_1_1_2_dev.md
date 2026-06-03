@@ -29,15 +29,16 @@ updater, or release workflow.
 - `app/parser/`, `app/shared/`, `app/import_checker/`, and
   `app/export_checker/` contain legacy parser/checker behavior and useful
   customs-domain logic.
-- `app/updater.py` and `app/runtime.py` remain compatibility code for the older
-  application path.
+- `app/runtime.py` remains compatibility code for the older application path.
+  The legacy `app/updater.py` flow has been retired; production updates use
+  `v2/core/updater.py` and the installer package.
 - `config/settings.json` and root `settings.json` remain legacy settings.
 
 ### Build And Release
 
 - `AI_Customs_ERP_V2.spec` is the active PyInstaller spec.
 - `build_v2_exe.ps1` builds the local V2 executable.
-- `build_dev_release.ps1` performs DEV release packaging and upload.
+- `scripts/build_release_package.ps1` builds the installer release package.
 - `.github/workflows/release.yml` owns GitHub Actions release lifecycle.
 - `scripts/release_manager.ps1` owns DEV overwrite, asset upload, latest
   verification, and old DEV release cleanup.
@@ -110,9 +111,10 @@ Added `engine/audit/`:
 
 - Existing UI imports and V2 build entry remain unchanged.
 - Existing parser contracts remain unchanged.
-- Existing updater URL rule remains `/releases/latest/download/version.json`.
-- Existing local dist executable remains `通洋報關平台.exe`.
-- GitHub release asset remains `TongYangCustomsPlatform.exe`.
+- Stable updater URL remains `/releases/latest/download/version.json`.
+- Internal RC updater URL uses `config/dev_version.json`.
+- Installed app executable remains `TongYangCustomsPlatform.exe`.
+- GitHub release asset is `TongYangCustomsPlatform_Setup.exe`.
 - The new `engine/` package is additive and wraps active V2 implementation.
 
 ## Known Risks

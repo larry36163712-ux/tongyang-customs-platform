@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path.cwd()
+SOURCE = ROOT / "source"
 VERSION_FILE = ROOT / "version_info.txt"
 payload = ROOT / "installer_payload"
 datas = []
@@ -14,8 +15,8 @@ for name in ("TongYangCustomsPlatform.exe", "version.json", "SHA256.txt"):
 
 
 a = Analysis(
-    ["scripts/installer_stub.py"],
-    pathex=[str(ROOT)],
+    ["source/scripts/installer_stub.py"],
+    pathex=[str(SOURCE), str(ROOT)],
     binaries=[],
     datas=datas,
     hiddenimports=[],

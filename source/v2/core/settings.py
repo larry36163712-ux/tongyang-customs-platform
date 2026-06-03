@@ -16,7 +16,7 @@ class UpdateSettings:
         "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/latest/download/version.json"
     )
     dev_manifest_url: str = (
-        "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/config/dev_version.json"
+        "https://raw.githubusercontent.com/larry36163712-ux/tongyang-customs-platform/main/source/config/dev_version.json"
     )
 
 
@@ -40,7 +40,11 @@ class BuildInfo:
 def app_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path.cwd()
+    cwd = Path.cwd()
+    source_dir = cwd / "source"
+    if (source_dir / "v2").exists() and (source_dir / "config").exists():
+        return source_dir
+    return cwd
 
 
 def bundled_base_dir() -> Path:

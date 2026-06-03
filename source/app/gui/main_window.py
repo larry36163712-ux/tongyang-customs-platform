@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-import threading
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,6 @@ from app.history import save_check_history
 from app.import_checker.checker import ImportChecker
 from app.parser.document import UploadedDocument
 from app.parser.pdf_parser import parse_uploaded_documents
-from app.updater import check_for_updates
 from app.version import app_version
 
 
@@ -283,13 +281,9 @@ class CustomsPlatformApp(tk.Tk):
         self.summary_label.configure(text=f"{report.summary}　紀錄 #{history_id}")
 
     def _check_updates(self, apply_update: bool, silent: bool) -> None:
-        def worker() -> None:
-            result = check_for_updates(self.app_version, self.settings.update, apply_update=apply_update)
-            if silent and result.status in {"current", "offline", "disabled"}:
-                return
-            self.after(0, lambda: messagebox.showinfo("更新", result.message))
-
-        threading.Thread(target=worker, daemon=True).start()
+        if silent:
+            return
+        messagebox.showinfo("Updater", "Legacy updater has been retired. Use the production V2 updater.")
 
     @staticmethod
     def _set_text(widget: tk.Text, value: str) -> None:

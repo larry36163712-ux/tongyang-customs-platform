@@ -38,7 +38,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    engine = DocumentWorkflowEngine(cache_root=root / "cache", rules_path=Path("config/customs_rules.json"))
+    engine = DocumentWorkflowEngine(cache_root=root / "cache", rules_path=root / "config/customs_rules.json")
     result = engine.process_paths([str(sample)])
     if not result.intake_files:
         raise RuntimeError("intake failed")
