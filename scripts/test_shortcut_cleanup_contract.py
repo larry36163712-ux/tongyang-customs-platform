@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+import inspect
 
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+import scripts.installer_stub as installer_stub
 from v2.core.deployment import cleanup_desktop_artifacts
 
 
@@ -85,6 +87,11 @@ def main() -> int:
                 raise AssertionError("unrelated desktop file was removed")
             if len(removed) < len(forbidden):
                 raise AssertionError(f"expected at least {len(forbidden)} removals, got {len(removed)}")
+            installer_main = inspect.getsource(installer_stub.main)
+            if "[] if silent_update else _ensure_shortcuts" in installer_main:
+                raise AssertionError("silent update must repair shortcuts; it cannot skip _ensure_shortcuts")
+            if "shortcuts = _ensure_shortcuts" not in installer_main:
+                raise AssertionError("installer main must run shortcut repair during install and silent update")
     finally:
         if original_userprofile is None:
             os.environ.pop("USERPROFILE", None)

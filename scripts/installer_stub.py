@@ -567,7 +567,7 @@ def main() -> int:
     )
     migration = _migrate_legacy_program_files_data(root, machine_install=machine_install)
     permissions = _grant_runtime_permissions(root)
-    shortcuts = [] if silent_update else _ensure_shortcuts(Path(install_state["exe"]))
+    shortcuts = _ensure_shortcuts(Path(install_state["exe"]))
     desktop_cleanup = _cleanup_desktop_artifacts(Path(install_state["exe"]))
     state = {
         "status": "installed",

@@ -1,17 +1,17 @@
-{
+﻿{
   "app_name": "通洋報關平台",
-  "version": "v1.1.10-rc.8",
+  "version": "v1.1.10-rc.9",
   "channel": "dev",
-  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.8/TongYangCustomsPlatform_Setup.exe",
-  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.8/TongYangCustomsPlatform_Setup.exe",
-  "sha256": "3f6fa6e85f3c74f10292c0e94bff5fe353c8b7a0a97b624063078aea669636f5",
-  "app_sha256": "3f6fa6e85f3c74f10292c0e94bff5fe353c8b7a0a97b624063078aea669636f5",
-  "build_id": "v1.1.10-rc.8-3f6fa6e85f3c",
-  "build_time": "2026-06-03T10:58:44+00:00",
-  "release_id": "v1.1.10-rc.8",
-  "release_notes": "dev release v1.1.10-rc.8",
-  "notes": "dev release v1.1.10-rc.8",
-  "minimum_supported_version": "v1.1.10-rc.8",
+  "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.9/TongYangCustomsPlatform_Setup.exe",
+  "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.9/TongYangCustomsPlatform_Setup.exe",
+  "sha256": "cb5c5d3f18827a2d11bffba8e67349a6319181e13c86ae9f1efeb633a8ea5d4a",
+  "app_sha256": "cb5c5d3f18827a2d11bffba8e67349a6319181e13c86ae9f1efeb633a8ea5d4a",
+  "build_id": "v1.1.10-rc.9-cb5c5d3f1882",
+  "build_time": "2026-06-03T11:00:04+00:00",
+  "release_id": "v1.1.10-rc.9",
+  "release_notes": "Internal RC v1.1.10-rc.9 production stabilization",
+  "notes": "Internal RC v1.1.10-rc.9 production stabilization",
+  "minimum_supported_version": "v1.1.10-rc.9",
   "package_type": "installer",
-  "package_sha256": "c9cb2c05f76646ccebaf95de5d471ae3ab82d3d7a6cc2eb04c125e7681ca22a5"
+  "package_sha256": "e5cb68bc3e7d5868d62fb27b52425a05d5b32c743d416065e1f034f4b32f9f31"
 }
