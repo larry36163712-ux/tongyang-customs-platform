@@ -4,14 +4,14 @@
   "channel": "dev",
   "exe_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.9/TongYangCustomsPlatform_Setup.exe",
   "download_url": "https://github.com/larry36163712-ux/tongyang-customs-platform/releases/download/v1.1.10-rc.9/TongYangCustomsPlatform_Setup.exe",
-  "sha256": "5a925e1fa90b1e67edc53e79148607c378b3f89f8d99d4f72e4461c36c10170a",
-  "app_sha256": "5a925e1fa90b1e67edc53e79148607c378b3f89f8d99d4f72e4461c36c10170a",
-  "build_id": "v1.1.10-rc.9-5a925e1fa90b",
-  "build_time": "2026-06-03T11:06:53+00:00",
+  "sha256": "c760434011540f15f85459ea61c030f0a71f70862c5b56a1143030557a8185e2",
+  "app_sha256": "c760434011540f15f85459ea61c030f0a71f70862c5b56a1143030557a8185e2",
+  "build_id": "v1.1.10-rc.9-c76043401154",
+  "build_time": "2026-06-03T16:19:21+00:00",
   "release_id": "v1.1.10-rc.9",
   "release_notes": "dev release v1.1.10-rc.9",
   "notes": "dev release v1.1.10-rc.9",
   "minimum_supported_version": "v1.1.10-rc.9",
   "package_type": "installer",
-  "package_sha256": "48be0e98a3a33b3b67051e722577cfa60aaa94a720943a573f72c19b1100d61f"
+  "package_sha256": "e416dea866e6d96f4730ad309729c3e1ebc6db41eeac212c70820c44b663281a"
 }
